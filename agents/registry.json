@@ -139,7 +139,7 @@
         "setupScript": "codex/install.sh",
         "setupActions": ["install", "status", "uninstall"]
       },
-      "launch": "codex -c model={model} -c model_provider=subconscious -c web_search=disabled -c model_providers.subconscious.name=Subconscious -c model_providers.subconscious.base_url={baseUrlV1} -c model_providers.subconscious.wire_api=responses -c model_providers.subconscious.env_key=SUBCONSCIOUS_API_KEY -c model_providers.subconscious.stream_idle_timeout_ms=300000",
+      "launch": "codex -c model={model} -c model_provider=subconscious -c web_search=disabled -c model_providers.subconscious.name=Subconscious -c model_providers.subconscious.base_url={baseUrlV1} -c model_providers.subconscious.wire_api=responses -c model_providers.subconscious.env_key=SUBCONSCIOUS_API_KEY -c model_providers.subconscious.stream_idle_timeout_ms=900000",
       "env": {
         "SUBCONSCIOUS_API_KEY": "{apiKey}",
         "SUBCONSCIOUS_GATEWAY_URL": "{baseUrl}"
