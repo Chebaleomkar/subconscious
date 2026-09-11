@@ -193,10 +193,10 @@ const AGENT_HELP = {
   codex: {
     usage: 'subc [-p NAME] codex [help|install|status|uninstall] [Codex arguments...]',
     behavior:
-      'Launches Codex with a temporary Subconscious provider catalog. Compaction hooks are merged into ~/.codex/hooks.json and removed with subc codex uninstall.',
+      'Launches Codex with a temporary Subconscious provider catalog; nothing is written to ~/.codex. Compaction hooks are installed separately with subc codex install, and Codex will not run them until you trust them with /hooks.',
     options: [
       ['help', 'Show this help'],
-      ['install', 'Install only the Subconscious compaction hooks'],
+      ['install', 'Install the Subconscious compaction hooks (then trust with /hooks)'],
       ['status', 'Inspect the installed compaction hooks'],
       ['uninstall', 'Remove only the Subconscious Codex hooks'],
       ['--model MODEL', 'Override the profile model for this launch'],
@@ -205,7 +205,7 @@ const AGENT_HELP = {
       ['--auto-compact-token-limit N', 'Override the automatic compaction threshold'],
       ['--reasoning-effort LEVEL', 'Use none, low, medium, high, or max'],
       ['--external-tools', 'Enable Codex apps/plugins for this launch'],
-      ['--subagents', 'Use the pinned legacy Codex subagent mode'],
+      ['--stream-idle-timeout MS', 'Allow a longer silent think before timing out'],
       ['-- ARGS...', 'Pass remaining arguments to Codex'],
     ],
   },
