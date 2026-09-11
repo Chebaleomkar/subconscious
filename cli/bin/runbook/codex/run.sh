@@ -255,11 +255,12 @@ fi
 export SUBCONSCIOUS_API_KEY="$API_KEY"
 export SUBCONSCIOUS_GATEWAY_URL="${GATEWAY_URL%/}"
 
-# Merge compaction hooks without replacing ~/.codex/hooks.json or config.toml.
-HOOK_SRC="${SCRIPT_DIR}/hook.sh"
-# shellcheck source=hooks-lib.sh
-source "${SCRIPT_DIR}/hooks-lib.sh"
-codex_ensure_hooks best-effort || true
+# Compaction hooks are deliberately NOT installed here. Installing them is a
+# change to ~/.codex that outlives the session, and Codex will not run a hook
+# until the user has trusted it, which only they can do. Doing that from a
+# launcher meant rewriting the same hook several times a day, so trust never
+# stuck and the hooks never ran. `subc codex install` owns it instead, and
+# `subc codex status` reports whether they are in place.
 
 # Write a temp model catalog so Codex doesn't print "model metadata not found".
 # This is the one thing that can't be passed via -c flags.

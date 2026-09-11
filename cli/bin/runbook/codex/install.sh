@@ -33,6 +33,16 @@ Usage:
 
 Merges Subconscious compaction hooks into ~/.codex/hooks.json. Does not write
 config.toml. Launch Codex with subc codex.
+
+The hooks report compaction start and end to the gateway, which is what lets a
+conversation's turns stay correlated across a compaction boundary.
+
+Codex will not run a hook until you trust it. After installing, type /hooks
+inside Codex once and approve them; until then they are present but inert.
+Non-interactive runs have nobody to ask, so `codex exec` can only run them with
+--dangerously-bypass-hook-trust, which is yours to opt into and is never passed
+for you. Fleet installs should ship the hooks through Codex's managed
+(MDM) configuration, which is trusted without prompting.
 EOF
 }
 
