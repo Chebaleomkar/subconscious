@@ -193,7 +193,7 @@ const AGENT_HELP = {
   codex: {
     usage: 'subc [-p NAME] codex [help|install|status|uninstall] [Codex arguments...]',
     behavior:
-      'Launches Codex with a temporary Subconscious provider catalog; nothing is written to ~/.codex. Compaction hooks are installed separately with subc codex install, and Codex will not run them until you trust them with /hooks.',
+      'Launches Codex with a temporary Subconscious provider catalog. Compaction hooks are merged into ~/.codex/hooks.json on first launch and removed with subc codex uninstall; Codex will not run them until you trust them with /hooks once.',
     options: [
       ['help', 'Show this help'],
       ['install', 'Install the Subconscious compaction hooks (then trust with /hooks)'],
