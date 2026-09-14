@@ -32,6 +32,15 @@ import { compareVersions } from './update-check.js';
 
 export const MIN_CLAUDE_CODE_VERSION = '2.1.242';
 
+// First Codex that honours `multi_agent_version: "v2"` in the model catalog,
+// found by installing each release and reading what it advertises: 0.142.5 and
+// below offer no subagent namespace at all, 0.143.0 offers `collaboration`.
+//
+// Below this the catalog field is not rejected, it is ignored - the run simply
+// has no subagents and nothing says why. That silence is the reason for a
+// version gate rather than a note in the docs.
+export const MIN_CODEX_VERSION = '0.143.0';
+
 // --- Registry (single source of truth, generated copy shipped in the package).
 const registry = JSON.parse(
   readFileSync(new URL('./registry.generated.json', import.meta.url), 'utf-8'),
@@ -627,6 +636,10 @@ export function parseClaudeVersion(text) {
 }
 
 export function claudeVersionNeedsUpgrade(installed, minimum = MIN_CLAUDE_CODE_VERSION) {
+  return versionNeedsUpgrade(installed, minimum);
+}
+
+export function versionNeedsUpgrade(installed, minimum) {
   return Boolean(installed && minimum && compareVersions(installed, minimum) < 0);
 }
 
@@ -651,13 +664,20 @@ export function readClaudeVersion(bin, binDir, options = {}) {
   }
 }
 
+const MINIMUM_VERSIONS = {
+  'claude-code': { minimum: MIN_CLAUDE_CODE_VERSION, label: 'Claude Code' },
+  // Below this, subagents are silently absent rather than broken.
+  codex: { minimum: MIN_CODEX_VERSION, label: 'Codex' },
+};
+
 async function ensureClaudeCompatible(agent, binDir) {
-  if (agent.id !== 'claude-code') return;
+  const requirement = MINIMUM_VERSIONS[agent.id];
+  if (!requirement) return;
   const version = readClaudeVersion(agent.bin, binDir);
-  if (!claudeVersionNeedsUpgrade(version)) return;
+  if (!versionNeedsUpgrade(version, requirement.minimum)) return;
 
   console.error(
-    `\n  Minimum supported Claude Code version is ${MIN_CLAUDE_CODE_VERSION}. Your version is ${version}. Upgrade to get the best experience.\n`,
+    `\n  Minimum supported ${requirement.label} version is ${requirement.minimum}. Your version is ${version}. Upgrade to get the best experience.\n`,
   );
   console.error(`  Upgrade it with:`);
   console.error(`    ${c.cyan}${agent.install}${c.reset}`);
