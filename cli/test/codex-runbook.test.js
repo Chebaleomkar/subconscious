@@ -14,9 +14,11 @@ const capturedArgs = path.join(testDir, 'args.txt');
 await fs.writeFile(
   fakeCodex,
   `#!/bin/sh
-: > "$CAPTURED_ARGS"
+# Recording the argv is optional: tests that only care about the catalog do not
+# set CAPTURED_ARGS, and the stub must not fail them.
+[ -n "$CAPTURED_ARGS" ] && : > "$CAPTURED_ARGS"
 for arg in "$@"; do
-  printf '%s\\n' "$arg" >> "$CAPTURED_ARGS"
+  [ -n "$CAPTURED_ARGS" ] && printf '%s\\n' "$arg" >> "$CAPTURED_ARGS"
   case "$arg" in
     model_catalog_json=*) cp "\${arg#model_catalog_json=}" "$CAPTURED_CATALOG" ;;
   esac
