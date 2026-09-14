@@ -206,6 +206,8 @@ const AGENT_HELP = {
       ['--reasoning-effort LEVEL', 'Use none, low, medium, high, or max'],
       ['--external-tools', 'Enable Codex apps/plugins for this launch'],
       ['--stream-idle-timeout MS', 'Allow a longer silent think before timing out'],
+      ['--max-subagents N', 'Subagents allowed to run at once (default 4)'],
+      ['--subagent-effort LEVEL', 'Effort for subagents, separate from the parent'],
       ['-- ARGS...', 'Pass remaining arguments to Codex'],
     ],
   },

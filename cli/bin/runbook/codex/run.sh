@@ -22,6 +22,8 @@
 #   ./run.sh                         # uses GATEWAY_URL/API_KEY from ../.env
 #   ./run.sh --context-window 5000000 -- --resume
 #   ./run.sh --stream-idle-timeout 1800000  # allow a 30min silent think
+#   ./run.sh --max-subagents 12        # raise the concurrent-subagent ceiling
+#   ./run.sh --subagent-effort low     # cheaper subagents than the parent
 #   ./run.sh --external-tools          # include Codex apps/plugins (may exceed gateway tool limits)
 #
 # Config: copy ../env.example to ../.env and edit. .env is gitignored.
@@ -43,7 +45,7 @@ if [[ -f "$SHARED_ENV" ]]; then set -a; source "$SHARED_ENV"; set +a; fi
 GATEWAY_URL="${GATEWAY_URL:-}"
 API_KEY="${CODEX_API_KEY:-${API_KEY:-}}"
 MODEL="${MODEL:-subconscious/glm-5.3-marathon}"
-MAX_CONCURRENT_SUBAGENTS="${MAX_CONCURRENT_SUBAGENTS:-4}"
+MAX_CONCURRENT_SUBAGENTS="${MAX_CONCURRENT_SUBAGENTS:-}"
 # Effort for spawned agents, independent of the parent's. Empty inherits the
 # Codex default. See the note above SUBAGENT_ARGS for why max is a poor choice.
 CODEX_SUBAGENT_REASONING_EFFORT="${CODEX_SUBAGENT_REASONING_EFFORT-medium}"
@@ -85,6 +87,14 @@ if [[ "${BASH_SOURCE[0]:-$0}" == "${0}" ]]; then
         ;;
       --stream-idle-timeout)
         CODEX_STREAM_IDLE_TIMEOUT_MS="${2:-}"
+        shift 2
+        ;;
+      --max-subagents)
+        MAX_CONCURRENT_SUBAGENTS="${2:-}"
+        shift 2
+        ;;
+      --subagent-effort)
+        CODEX_SUBAGENT_REASONING_EFFORT="${2:-}"
         shift 2
         ;;
       --external-tools)
@@ -229,6 +239,12 @@ fi
 # marathon models at max effort think for many minutes without emitting a
 # token, and a subagent turn is one uninterrupted think, so inheriting max
 # makes every delegated subtask look like a hang.
+# Applied after argument parsing so --max-subagents can win. Four is a floor
+# rather than a considered limit: Codex's own default is three, and exceeding
+# either one fails the spawn outright rather than queueing it, so a run that
+# wants more should say so instead of collecting retries.
+MAX_CONCURRENT_SUBAGENTS="${MAX_CONCURRENT_SUBAGENTS:-4}"
+
 SUBAGENT_ARGS=()
 if [[ -z "$CODEX_MULTI_AGENT_VERSION" ]]; then
   # Clearing the catalog field alone only downgrades Codex to multi-agent v1,
