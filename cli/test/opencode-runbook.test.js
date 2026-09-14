@@ -18,6 +18,8 @@ after(async () => {
 test('OpenCode launch replaces the Subconscious catalog on every startup', () => {
   const models = [
     'subconscious/glm-5.2',
+    'subconscious/deepseek-v4.1-flash-marathon',
+    'subconscious/deepseek-v4.1-flash-marathon-other',
     'subconscious/deepseek-v4-flash-marathon',
     'subconscious/glm-5.3-marathon',
     'subconscious/tim-qwen3.6-27b',
@@ -43,4 +45,46 @@ test('OpenCode launch replaces the Subconscious catalog on every startup', () =>
   assert.deepEqual(Object.keys(config.provider['subconscious-cli'].models), models);
   assert.equal(config.model, `subconscious-cli/${models[0]}`);
   assert.equal(config.provider['subconscious-cli'].models['gw-glm-5.2'], undefined);
+  for (const [id, model] of Object.entries(config.provider['subconscious-cli'].models)) {
+    const vision = id === 'subconscious/deepseek-v4.1-flash-marathon';
+    assert.equal(model.attachment, vision ? true : undefined, id);
+    assert.deepEqual(model.modalities, vision ? { input: ['text', 'image'], output: ['text'] } : undefined, id);
+  }
+});
+
+test('OpenCode enables vision for an explicitly selected model missing from the catalog', () => {
+  const model = 'subconscious/deepseek-v4.1-flash-marathon';
+  const result = spawnSync('bash', [new URL('../bin/runbook/opencode/run.sh', import.meta.url).pathname], {
+    encoding: 'utf8',
+    env: {
+      ...process.env, PATH: `${testDir}:${process.env.PATH}`, GATEWAY_URL: 'https://gateway.example',
+      API_KEY: 'sk-test', MODEL: model, SUBCONSCIOUS_MODELS: 'custom/model', SUBC_ENV_FILE: os.devNull,
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const config = JSON.parse(result.stdout);
+  assert.equal(config.model, `subconscious-cli/${model}`);
+  assert.equal(config.provider['subconscious-cli'].models[model].attachment, true);
+});
+
+test('the standalone OpenCode installer also advertises vision and preserves other providers', async () => {
+  const home = await fs.mkdtemp(path.join(testDir, 'install-'));
+  const file = path.join(home, '.opencode', 'opencode.json');
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, JSON.stringify({ provider: { other: { models: { keep: {} } } } }));
+  const model = 'subconscious/deepseek-v4.1-flash-marathon';
+  const result = spawnSync('bash', [new URL('../bin/runbook/opencode/install.sh', import.meta.url).pathname, 'install'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env, HOME: home, XDG_CONFIG_HOME: path.join(home, '.config'),
+      GATEWAY_URL: 'https://gateway.example', API_KEY: 'sk-test', MODEL: model,
+      SUBCONSCIOUS_MODELS: 'subconscious/deepseek-v4-flash-marathon', SUBC_ENV_FILE: os.devNull,
+    },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const config = JSON.parse(await fs.readFile(file, 'utf8'));
+  assert.deepEqual(config.provider.other, { models: { keep: {} } });
+  assert.equal(config.provider.subconscious.models[model].attachment, true);
+  assert.deepEqual(config.provider.subconscious.models[model].modalities, { input: ['text', 'image'], output: ['text'] });
+  assert.equal(config.provider.subconscious.models['subconscious/deepseek-v4-flash-marathon'].attachment, undefined);
 });

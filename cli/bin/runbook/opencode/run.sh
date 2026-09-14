@@ -18,6 +18,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../model-capabilities.generated.sh"
 
 # Load shared env from SUBC_ENV_FILE, or a sibling .env / env.example.
 SHARED_ENV="${SUBC_ENV_FILE:-${SCRIPT_DIR}/../.env}"
@@ -33,7 +34,8 @@ OUTPUT_LIMIT="${OPENCODE_OUTPUT_LIMIT:-65536}"
 DEFAULT_SUBCONSCIOUS_MODELS="subconscious/glm-5.3-marathon
 subconscious/glm-5.2
 subconscious/tim-qwen3.6-27b
-subconscious/deepseek-v4-flash-marathon"
+subconscious/deepseek-v4-flash-marathon
+subconscious/deepseek-v4.1-flash-marathon"
 SUPPORTED_MODELS=()
 
 add_supported_model() {
@@ -58,7 +60,11 @@ done <<< "${SUBCONSCIOUS_MODELS:-$DEFAULT_SUBCONSCIOUS_MODELS}"
 
 MODELS_JSON=""
 for model_id in "${SUPPORTED_MODELS[@]}"; do
-  model_json="\"${model_id}\":{\"name\":\"${model_id}\",\"tools\":true,\"limit\":{\"context\":${CONTEXT_LIMIT},\"output\":${OUTPUT_LIMIT}}}"
+  vision_fields=""
+  if subc_model_supports_vision "$model_id"; then
+    vision_fields=',"attachment":true,"modalities":{"input":["text","image"],"output":["text"]}'
+  fi
+  model_json="\"${model_id}\":{\"name\":\"${model_id}\",\"tools\":true,\"limit\":{\"context\":${CONTEXT_LIMIT},\"output\":${OUTPUT_LIMIT}}${vision_fields}}"
   if [[ -n "$MODELS_JSON" ]]; then
     MODELS_JSON="${MODELS_JSON},${model_json}"
   else

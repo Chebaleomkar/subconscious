@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { modelSupportsVision } from '../model-capabilities.js';
 import { defaults, origin, value, modelIds, positiveInteger, parseOptions, object, readJson, writeJson } from './common.js';
 
 const owned = command => {
@@ -92,7 +93,7 @@ export async function windowsSetup(id, action, argv, environment, { home = os.ho
         const context = positiveInteger(options['--max-input-tokens'] || value(env, 'COPILOT_MAX_INPUT_TOKENS', '5000000'), 'max-input-tokens');
         const maxTokens = positiveInteger(options['--max-output-tokens'] || value(env, 'COPILOT_MAX_OUTPUT_TOKENS', '65536'), 'max-output-tokens');
         providers.push({ name: providerName, vendor: 'customendpoint', apiKey: '${input:chat.lm.secret.subconscious-gateway}', apiType: 'messages', models: modelIds(env).map(id => ({
-          id, name: `Subconscious ${id}`, url: `${gatewayUrl}/v1/messages`, toolCalling: true, vision: false,
+          id, name: `Subconscious ${id}`, url: `${gatewayUrl}/v1/messages`, toolCalling: true, vision: modelSupportsVision(id),
           maxInputTokens: context, maxOutputTokens: maxTokens, thinking: true, streaming: true,
           requestHeaders: { 'x-subconscious-client': 'copilot' },
         })) });
@@ -131,7 +132,10 @@ export async function windowsSetup(id, action, argv, environment, { home = os.ho
     if (installing) {
       const context = positiveInteger(options['--context-window'] || value(env, 'PI_CONTEXT_WINDOW', '5000000'), 'context-window');
       const maxTokens = positiveInteger(options['--max-tokens'] || value(env, 'PI_MAX_TOKENS', '65536'), 'max-tokens');
-      providers.subconscious = { baseUrl: `${gatewayUrl}/v1`, api: 'openai-completions', apiKey, headers: { 'x-subconscious-client': 'pi' }, models: modelIds(env).map(id => ({ id, contextWindow: context, maxTokens, compat: { sendSessionAffinityHeaders: true, sessionAffinityFormat: 'openai-nosession' } })) };
+      providers.subconscious = { baseUrl: `${gatewayUrl}/v1`, api: 'openai-completions', apiKey, headers: { 'x-subconscious-client': 'pi' }, models: modelIds(env).map(id => ({
+        id, contextWindow: context, maxTokens, compat: { sendSessionAffinityHeaders: true, sessionAffinityFormat: 'openai-nosession' },
+        ...(modelSupportsVision(id) ? { input: ['text', 'image'] } : {}),
+      })) };
       await fs.mkdir(path.dirname(extension), { recursive: true });
       await fs.copyFile(new URL('./pi-compaction.ts', import.meta.url), extension);
       await writeJson(config, { gatewayUrl, apiKey });

@@ -6,6 +6,7 @@
  *   1. cli/bin/registry.generated.json   — verbatim copy the CLI ships + reads
  *   2. examples/<dir>/package.json        — subconscious.agent + setup blocks
  *   3. examples/manifest.json             — via scripts/generate-manifest.js
+ *   4. cli/bin/runbook/model-capabilities.generated.sh — Unix capability lookup
  *
  * Do not hand-edit any of those outputs. Edit registry.json and re-run.
  */
@@ -115,6 +116,31 @@ function writeManifest() {
   });
 }
 
+function writeModelCapabilities() {
+  const visionModels = Object.entries(registry.modelCapabilities || {})
+    .filter(([, capabilities]) => capabilities.vision === true)
+    .map(([id]) => {
+      if (!/^[-A-Za-z0-9._:/+]+$/.test(id)) throw new Error(`Invalid model id: ${id}`);
+      return `    '${id}') return 0 ;;`;
+    });
+  const source = [
+    '#!/usr/bin/env bash',
+    '# Generated from agents/registry.json. Do not edit by hand.',
+    '# Exact IDs only: similarly named models do not inherit capabilities.',
+    'subc_model_supports_vision() {',
+    '  case "${1:-}" in',
+    ...visionModels,
+    '    *) return 1 ;;',
+    '  esac',
+    '}',
+    '',
+  ].join('\n');
+  const dest = path.join(CLI_BIN_DIR, 'runbook', 'model-capabilities.generated.sh');
+  fs.writeFileSync(dest, source);
+  console.log(`Wrote ${path.relative(ROOT, dest)}`);
+}
+
 writeCliData();
+writeModelCapabilities();
 writeExamples();
 writeManifest();

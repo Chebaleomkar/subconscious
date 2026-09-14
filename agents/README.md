@@ -47,6 +47,12 @@ profile's authenticated `/v1/models/available` response, then the public
 `/v1/models` fleet catalog. `defaults.model` selects which entry new profiles
 use initially.
 
+`modelCapabilities` records explicit capabilities by exact gateway model ID.
+DeepSeek V4.1 Flash Marathon advertises `vision: true`. The generator writes
+`cli/bin/runbook/model-capabilities.generated.sh` for Unix, while Windows reads
+the generated JSON registry. Each harness translates this into its own vision
+or image-input fields; unlisted models retain their existing settings.
+
 `{env:...}` is **OpenCode's own** templating and is preserved verbatim — it is
 never substituted by us.
 

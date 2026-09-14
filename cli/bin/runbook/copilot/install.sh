@@ -64,6 +64,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../model-capabilities.generated.sh"
 HOOK_SRC="${SCRIPT_DIR}/hook.sh"
 HOOKS_TEMPLATE="${SCRIPT_DIR}/hooks.json"
 
@@ -177,7 +178,8 @@ done
 DEFAULT_SUBCONSCIOUS_MODELS="subconscious/glm-5.3-marathon
 subconscious/glm-5.2
 subconscious/tim-qwen3.6-27b
-subconscious/deepseek-v4-flash-marathon"
+subconscious/deepseek-v4-flash-marathon
+subconscious/deepseek-v4.1-flash-marathon"
 SUPPORTED_MODELS=()
 
 add_supported_model() {
@@ -294,13 +296,16 @@ write_config() {
   local existing
   existing="$(strip_subconscious "$models_json")"
 
-  local provider_models='[]' model_id
+  local provider_models='[]' model_id vision
   for model_id in "${SUPPORTED_MODELS[@]}"; do
+    vision=false
+    if subc_model_supports_vision "$model_id"; then vision=true; fi
     provider_models=$(jq -cn \
       --argjson models "$provider_models" \
       --arg modelId "$model_id" \
       --arg modelName "Subconscious ${model_id}" \
       --arg url "$messages_url" \
+      --argjson vision "$vision" \
       --argjson maxIn "$MAX_INPUT_TOKENS" \
       --argjson maxOut "$MAX_OUTPUT_TOKENS" \
       '$models + [{
@@ -308,7 +313,7 @@ write_config() {
         name: $modelName,
         url: $url,
         toolCalling: true,
-        vision: false,
+        vision: $vision,
         maxInputTokens: $maxIn,
         maxOutputTokens: $maxOut,
         thinking: true,

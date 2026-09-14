@@ -7,7 +7,7 @@ import { test } from 'node:test';
 
 const installPath = new URL('../bin/runbook/copilot/install.sh', import.meta.url);
 
-function runInstall(home, gatewayUrl = 'https://gateway.example') {
+function runInstall(home, gatewayUrl = 'https://gateway.example', overrides = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn('bash', [installPath.pathname, 'install'], {
       env: {
@@ -18,6 +18,7 @@ function runInstall(home, gatewayUrl = 'https://gateway.example') {
         MODEL: 'subconscious/glm-5.3-marathon',
         SUBCONSCIOUS_MODELS: 'subconscious/glm-5.3-marathon',
         MBTA_ENV_FILE: '/dev/null',
+        ...overrides,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -67,6 +68,25 @@ test('Copilot installer advertises thinking within the deployed context window',
       },
       { thinking: true, maxInputTokens: 5000000, maxOutputTokens: 65536 },
     );
+  } finally {
+    await fs.rm(home, { recursive: true, force: true });
+  }
+});
+
+test('Copilot enables vision for DeepSeek V4.1 without enabling it for other models', async () => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'subc-copilot-vision-'));
+  const visionModel = 'subconscious/deepseek-v4.1-flash-marathon';
+  const models = [visionModel, 'subconscious/deepseek-v4-flash-marathon', `${visionModel}-other`, 'custom/model'];
+  try {
+    const userDirectory = await createVsCodeUserDirectory(home);
+    const result = await runInstall(home, 'https://gateway.example', {
+      MODEL: visionModel, SUBCONSCIOUS_MODELS: models.join('\n'), SUBC_ENV_FILE: os.devNull,
+    });
+    assert.equal(result.code, 0, result.stderr);
+    const providers = JSON.parse(await fs.readFile(path.join(userDirectory, 'chatLanguageModels.json'), 'utf8'));
+    const provider = providers.find(({ name }) => name === 'Subconscious Gateway');
+    assert.deepEqual(provider.models.map(model => model.id), models);
+    for (const model of provider.models) assert.equal(model.vision, model.id === visionModel, model.id);
   } finally {
     await fs.rm(home, { recursive: true, force: true });
   }
