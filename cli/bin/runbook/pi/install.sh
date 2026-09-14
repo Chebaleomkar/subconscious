@@ -47,6 +47,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../model-capabilities.generated.sh"
 EXTENSION_SRC="${SCRIPT_DIR}/subconscious-compaction.ts"
 
 # Load shared env from SUBC_ENV_FILE, or a sibling .env / env.example.
@@ -117,7 +118,8 @@ done
 DEFAULT_SUBCONSCIOUS_MODELS="subconscious/glm-5.3-marathon
 subconscious/glm-5.2
 subconscious/tim-qwen3.6-27b
-subconscious/deepseek-v4-flash-marathon"
+subconscious/deepseek-v4-flash-marathon
+subconscious/deepseek-v4.1-flash-marathon"
 SUPPORTED_MODELS=()
 
 add_supported_model() {
@@ -142,7 +144,11 @@ done <<< "${SUBCONSCIOUS_MODELS:-$DEFAULT_SUBCONSCIOUS_MODELS}"
 
 MODEL_ENTRIES_JSON=""
 for model_id in "${SUPPORTED_MODELS[@]}"; do
-  model_json="{\"id\":\"${model_id}\",\"contextWindow\":${CONTEXT_WINDOW},\"maxTokens\":${MAX_TOKENS},\"compat\":{\"sendSessionAffinityHeaders\":true,\"sessionAffinityFormat\":\"openai-nosession\"}}"
+  vision_fields=""
+  if subc_model_supports_vision "$model_id"; then
+    vision_fields=',"input":["text","image"]'
+  fi
+  model_json="{\"id\":\"${model_id}\",\"contextWindow\":${CONTEXT_WINDOW},\"maxTokens\":${MAX_TOKENS},\"compat\":{\"sendSessionAffinityHeaders\":true,\"sessionAffinityFormat\":\"openai-nosession\"}${vision_fields}}"
   if [[ -n "$MODEL_ENTRIES_JSON" ]]; then
     MODEL_ENTRIES_JSON="${MODEL_ENTRIES_JSON},${model_json}"
   else

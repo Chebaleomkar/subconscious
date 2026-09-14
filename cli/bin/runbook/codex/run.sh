@@ -31,6 +31,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../model-capabilities.generated.sh"
 
 # Load shared env from SUBC_ENV_FILE, or a sibling .env / env.example.
 SHARED_ENV="${SUBC_ENV_FILE:-${SCRIPT_DIR}/../.env}"
@@ -105,7 +106,8 @@ esac
 DEFAULT_SUBCONSCIOUS_MODELS="subconscious/glm-5.3-marathon
 subconscious/glm-5.2
 subconscious/tim-qwen3.6-27b
-subconscious/deepseek-v4-flash-marathon"
+subconscious/deepseek-v4-flash-marathon
+subconscious/deepseek-v4.1-flash-marathon"
 SUPPORTED_MODELS=()
 
 add_supported_model() {
@@ -132,10 +134,14 @@ while IFS= read -r model_id; do
 done <<< "${SUBCONSCIOUS_MODELS:-$DEFAULT_SUBCONSCIOUS_MODELS}"
 
 write_model_catalog() {
-  local catalog_file="$1" model_id index=0
+  local catalog_file="$1" model_id vision_fields index=0
   {
     printf '{\n  "models": [\n'
     for model_id in "${SUPPORTED_MODELS[@]}"; do
+      vision_fields=""
+      if subc_model_supports_vision "$model_id"; then
+        vision_fields=', "input_modalities": ["text", "image"]'
+      fi
       if [[ "$index" -gt 0 ]]; then
         printf ',\n'
       fi
@@ -169,7 +175,7 @@ write_model_catalog() {
       "apply_patch_tool_type": "freeform",
       "truncation_policy": { "mode": "tokens", "limit": 10000 },
       "supports_parallel_tool_calls": true,
-      "experimental_supported_tools": []
+      "experimental_supported_tools": []${vision_fields}
     }
 EOF
       index=$((index + 1))

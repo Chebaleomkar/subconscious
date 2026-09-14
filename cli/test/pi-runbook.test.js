@@ -22,7 +22,9 @@ after(async () => {
 
 test('Pi launch replaces only the Subconscious provider with the live catalog', async () => {
   const models = [
+    'subconscious/deepseek-v4.1-flash-marathon',
     'subconscious/glm-5.2',
+    'subconscious/deepseek-v4.1-flash-marathon-other',
     'subconscious/deepseek-v4-flash-marathon',
     'subconscious/glm-5.3-marathon',
     'subconscious/tim-qwen3.6-27b',
@@ -57,6 +59,9 @@ test('Pi launch replaces only the Subconscious provider with the live catalog', 
   assert.equal(result.stdout.trim(), `--provider subconscious --model ${models[0]} --continue`);
 
   const config = JSON.parse(await fs.readFile(modelsPath, 'utf8'));
+  for (const model of config.providers.subconscious.models) {
+    assert.deepEqual(model.input, model.id === models[0] ? ['text', 'image'] : undefined, model.id);
+  }
   assert.deepEqual(config.providers.other.models, [{ id: 'other/model' }]);
   assert.deepEqual(
     config.providers.subconscious.models.map((model) => model.id),

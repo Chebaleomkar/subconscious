@@ -5,12 +5,18 @@
       "subconscious/glm-5.3-marathon",
       "subconscious/glm-5.2",
       "subconscious/tim-qwen3.6-27b",
-      "subconscious/deepseek-v4-flash-marathon"
+      "subconscious/deepseek-v4-flash-marathon",
+      "subconscious/deepseek-v4.1-flash-marathon"
     ],
     "baseUrl": "https://api.subconscious.dev",
     "baseUrlV1": "https://api.subconscious.dev/v1",
     "keyPlaceholder": "your_key",
     "platformUrl": "https://subconscious.dev/platform"
+  },
+  "modelCapabilities": {
+    "subconscious/deepseek-v4.1-flash-marathon": {
+      "vision": true
+    }
   },
   "agents": [
     {
@@ -212,6 +218,19 @@
                   "subconscious/deepseek-v4-flash-marathon": {
                     "name": "subconscious/deepseek-v4-flash-marathon",
                     "tools": true,
+                    "limit": {
+                      "context": 5000000,
+                      "output": 65536
+                    }
+                  },
+                  "subconscious/deepseek-v4.1-flash-marathon": {
+                    "name": "subconscious/deepseek-v4.1-flash-marathon",
+                    "tools": true,
+                    "attachment": true,
+                    "modalities": {
+                      "input": ["text", "image"],
+                      "output": ["text"]
+                    },
                     "limit": {
                       "context": 5000000,
                       "output": 65536

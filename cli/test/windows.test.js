@@ -203,6 +203,50 @@ test('invalid Codex flags cannot leave temp files', async t => {
   assert.throws(() => parseOptions(['--subagents=false'], { '--subagents': true }), /does not take a value/);
 });
 
+for (const selectedVision of [true, false]) test(`Windows harness vision metadata works with DeepSeek V4.1 ${selectedVision ? 'selected' : 'in the picker'}`, async t => {
+  const root = await temporary(t);
+  const visionModel = 'subconscious/deepseek-v4.1-flash-marathon';
+  const textModel = 'subconscious/deepseek-v4-flash-marathon';
+  const models = [textModel, visionModel, `${visionModel}-other`, 'custom/model'];
+  const environment = { ...env, MODEL: selectedVision ? visionModel : textModel, SUBCONSCIOUS_MODELS: models.join('\n') };
+
+  const oc = await windowsLaunch('opencode', [], environment);
+  const ocConfig = JSON.parse(oc.env.OPENCODE_CONFIG_CONTENT);
+  assert.equal(ocConfig.model, `subconscious-cli/${environment.MODEL}`);
+  for (const [id, model] of Object.entries(ocConfig.provider['subconscious-cli'].models)) {
+    assert.equal(model.attachment, id === visionModel ? true : undefined, id);
+    assert.deepEqual(model.modalities, id === visionModel ? { input: ['text', 'image'], output: ['text'] } : undefined, id);
+  }
+
+  const codex = await windowsLaunch('codex', [], environment, { tempRoot: root });
+  t.after(codex.cleanup);
+  const catalogPath = JSON.parse(codex.args.find(arg => arg.startsWith('model_catalog_json=')).slice('model_catalog_json='.length));
+  const catalog = JSON.parse(await fs.readFile(catalogPath, 'utf8'));
+  assert.equal(catalog.models[0].slug, environment.MODEL);
+  for (const model of catalog.models) assert.deepEqual(model.input_modalities, model.slug === visionModel ? ['text', 'image'] : undefined, model.slug);
+
+  const dsh = await windowsLaunch('deepseek-harness', [], environment, { tempRoot: root });
+  t.after(dsh.cleanup);
+  const overlay = await fs.readFile(dsh.args[2], 'utf8');
+  for (const entry of overlay.split('          - id: ').slice(1)) {
+    assert.equal(entry.includes('input: [text, image]'), entry.startsWith(`'${visionModel}'`), entry);
+  }
+
+  const home = path.join(root, 'home');
+  const appData = path.join(home, 'AppData', 'Roaming');
+  for (const client of ['pi', 'copilot']) {
+    await windowsSetup(client, 'install', [], { ...environment, APPDATA: appData }, { home, log: quiet });
+    const file = client === 'pi' ? path.join(home, '.pi', 'agent', 'models.json') : path.join(appData, 'Code', 'User', 'chatLanguageModels.json');
+    const document = JSON.parse(await fs.readFile(file, 'utf8'));
+    const provider = client === 'pi' ? document.providers.subconscious : document.find(provider => provider.name === 'Subconscious Gateway');
+    assert.equal(provider.models[0].id, environment.MODEL);
+    for (const model of provider.models) {
+      if (client === 'pi') assert.deepEqual(model.input, model.id === visionModel ? ['text', 'image'] : undefined, model.id);
+      else assert.equal(model.vision, model.id === visionModel, model.id);
+    }
+  }
+});
+
 test('OpenCode, Pi and sc have independent native launch specifications', async () => {
   const oc = await windowsLaunch('opencode', ['--', '--continue'], { ...env, OPENCODE_CONTEXT_LIMIT: '123456', OPENCODE_OUTPUT_LIMIT: '7890' });
   const config = JSON.parse(oc.env.OPENCODE_CONFIG_CONTENT);

@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { claudeNativeLaunch } from './claude.js';
+import { modelSupportsVision } from '../model-capabilities.js';
 import { defaults, value, origin, modelIds, positiveInteger, parseOptions, writeJson } from './common.js';
 
 function connection(env, keyName) {
@@ -25,7 +26,10 @@ export async function windowsLaunch(id, argv, env, { tempRoot = os.tmpdir() } = 
   if (id === 'opencode') {
     const context = positiveInteger(value(env, 'OPENCODE_CONTEXT_LIMIT', '5000000'), 'OPENCODE_CONTEXT_LIMIT');
     const output = positiveInteger(value(env, 'OPENCODE_OUTPUT_LIMIT', '65536'), 'OPENCODE_OUTPUT_LIMIT');
-    const models = Object.fromEntries(modelIds(env).map(id => [id, { name: id, tools: true, limit: { context, output } }]));
+    const models = Object.fromEntries(modelIds(env).map(id => [id, {
+      name: id, tools: true, limit: { context, output },
+      ...(modelSupportsVision(id) ? { attachment: true, modalities: { input: ['text', 'image'], output: ['text'] } } : {}),
+    }]));
     childEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify({
       $schema: 'https://opencode.ai/config.json', disabled_providers: ['subconscious'],
       provider: { 'subconscious-cli': { npm: '@ai-sdk/openai-compatible', name: 'Subconscious Gateway', options: {
@@ -51,6 +55,7 @@ export async function windowsLaunch(id, argv, env, { tempRoot = os.tmpdir() } = 
       supports_reasoning_summaries: false, support_verbosity: false, default_verbosity: null,
       apply_patch_tool_type: 'freeform', truncation_policy: { mode: 'tokens', limit: 10000 },
       supports_parallel_tool_calls: true, experimental_supported_tools: [],
+      ...(modelSupportsVision(id) ? { input_modalities: ['text', 'image'] } : {}),
     })) };
     // Validate all flags before creating a temporary directory.
     const threads = positiveInteger(value(env, 'MAX_CONCURRENT_SUBAGENTS', '4'), 'MAX_CONCURRENT_SUBAGENTS');
@@ -81,7 +86,7 @@ export async function windowsLaunch(id, argv, env, { tempRoot = os.tmpdir() } = 
     const cleanup = () => fs.rm(dir, { recursive: true, force: true });
     try {
       const file = path.join(dir, 'subconscious.cordis.yml');
-      const text = `- id: llm-pi-ai\n  config:\n    providers:\n      subconscious:\n        apiKeyEnv: SUBCONSCIOUS_API_KEY\n        displayName: Subconscious Gateway\n        api: openai-completions\n        baseURL: !!js process.env.SUBCONSCIOUS_DSH_BASE_URL\n        headers:\n          x-subconscious-client: deepseek-harness\n        compat:\n          supportsDeveloperRole: false\n          maxTokensField: max_tokens\n        defaultContextWindow: ${context}\n        defaultMaxTokens: ${maxTokens}\n        models:\n${models.map(id => `          - id: '${id}'\n            name: '${id}'\n            contextWindow: ${context}\n            maxTokens: ${maxTokens}`).join('\n')}\n- id: agent-default-model\n  config:\n    provider: subconscious\n    model: '${model}'\n`;
+      const text = `- id: llm-pi-ai\n  config:\n    providers:\n      subconscious:\n        apiKeyEnv: SUBCONSCIOUS_API_KEY\n        displayName: Subconscious Gateway\n        api: openai-completions\n        baseURL: !!js process.env.SUBCONSCIOUS_DSH_BASE_URL\n        headers:\n          x-subconscious-client: deepseek-harness\n        compat:\n          supportsDeveloperRole: false\n          maxTokensField: max_tokens\n        defaultContextWindow: ${context}\n        defaultMaxTokens: ${maxTokens}\n        models:\n${models.map(id => `          - id: '${id}'\n            name: '${id}'\n${modelSupportsVision(id) ? '            input: [text, image]\n' : ''}            contextWindow: ${context}\n            maxTokens: ${maxTokens}`).join('\n')}\n- id: agent-default-model\n  config:\n    provider: subconscious\n    model: '${model}'\n`;
       await fs.writeFile(file, text, { mode: 0o600, flag: 'wx' });
       const mode = ['web', 'headless'].includes(argv[0]) ? argv[0] : 'web';
       const rest = ['web', 'headless'].includes(argv[0]) ? argv.slice(1) : argv;
