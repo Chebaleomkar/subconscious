@@ -161,9 +161,14 @@ test('Codex launch caps subagent concurrency with the documented key', async () 
 test('Codex launch keeps subagents off the parent max reasoning effort', async () => {
   // A subagent turn is one uninterrupted think; inheriting max makes every
   // delegated subtask look like a hang.
+  //
+  // Low rather than medium: the gateway rounds medium up to high for GLM, and
+  // at high a subagent given an open-ended task never writes the closing
+  // `</think>`, so the turn returns as prose with no tool call and the agent
+  // reports success having written nothing.
   const args = await captureArgs();
   assert.ok(
-    args.includes('agents.default_subagent_reasoning_effort=medium'),
+    args.includes('agents.default_subagent_reasoning_effort=low'),
     args.join(' '),
   );
 });

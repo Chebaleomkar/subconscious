@@ -48,7 +48,14 @@ MODEL="${MODEL:-subconscious/glm-5.3-marathon}"
 MAX_CONCURRENT_SUBAGENTS="${MAX_CONCURRENT_SUBAGENTS:-}"
 # Effort for spawned agents, independent of the parent's. Empty inherits the
 # Codex default. See the note above SUBAGENT_ARGS for why max is a poor choice.
-CODEX_SUBAGENT_REASONING_EFFORT="${CODEX_SUBAGENT_REASONING_EFFORT-medium}"
+#
+# Low rather than medium: the gateway rounds medium up to high for GLM, and at
+# high a subagent handed an open-ended task keeps deliberating without ever
+# writing the closing `</think>`. The turn then comes back as one long block of
+# prose with no tool call, so the agent reports success having produced no
+# files. Measured against the worker on one broad task: low closed and called a
+# tool in ~1.5k characters, high ran past 76k and was still going.
+CODEX_SUBAGENT_REASONING_EFFORT="${CODEX_SUBAGENT_REASONING_EFFORT-low}"
 EXTERNAL_TOOLS="${CODEX_EXTERNAL_TOOLS:-false}"
 CODEX_CONTEXT_WINDOW="${CODEX_CONTEXT_WINDOW:-5000000}"
 CODEX_MAX_CONTEXT_WINDOW="${CODEX_MAX_CONTEXT_WINDOW:-}"
