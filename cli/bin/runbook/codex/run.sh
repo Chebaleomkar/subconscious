@@ -6,20 +6,24 @@
 # The model catalog (needed to suppress the "model metadata not found" warning)
 # is written to a temp file that is cleaned up on exit.
 #
-# Subagents are OFF by default. Current Codex (>=0.144) wraps subagent tools in a
-# `type: "namespace"` wire format that non-OpenAI providers can't resolve, causing
-# "unsupported call: spawn_agent" (upstream #32318, #26977). The fix (PR #29602) is
-# not yet merged.
+# Subagents are ON by default. The per-model `multi_agent_version` catalog
+# field selects WHICH implementation Codex offers, not whether it offers one:
+# "v2" gives the `collaboration` namespace, and an empty value falls back to
+# the older `multi_agent_v1` namespace rather than turning subagents off.
+# Only `agents.enabled=false` actually disables them, so clearing
+# CODEX_MULTI_AGENT_VERSION does both.
 #
-# To run with subagents, pass --subagents — this runs the pinned legacy
-# codex@0.132.0 with multi-agent v1 config (plain tool names) that the model can
-# resolve. Requires npx.
+# This needs a gateway that round-trips Codex's namespaced tools. Codex sends
+# them as `type: "namespace"` and resolves an incoming call by namespace plus
+# name, so a gateway that flattens the namespace for the model must restore it
+# on the way back, or every call fails with "unsupported call: spawn_agent".
 #
 # Usage:
 #   ./run.sh                         # uses GATEWAY_URL/API_KEY from ../.env
 #   ./run.sh --context-window 5000000 -- --resume
-#   ./run.sh --subagents              # run codex@0.132.0 with subagents enabled
-#   ./run.sh --subagents -- --resume  # subagents + passthrough args
+#   ./run.sh --stream-idle-timeout 1800000  # allow a 30min silent think
+#   ./run.sh --max-subagents 12        # raise the concurrent-subagent ceiling
+#   ./run.sh --subagent-effort low     # cheaper subagents than the parent
 #   ./run.sh --external-tools          # include Codex apps/plugins (may exceed gateway tool limits)
 #
 # Config: copy ../env.example to ../.env and edit. .env is gitignored.
@@ -41,16 +45,31 @@ if [[ -f "$SHARED_ENV" ]]; then set -a; source "$SHARED_ENV"; set +a; fi
 GATEWAY_URL="${GATEWAY_URL:-}"
 API_KEY="${CODEX_API_KEY:-${API_KEY:-}}"
 MODEL="${MODEL:-subconscious/glm-5.3-marathon}"
-MAX_CONCURRENT_SUBAGENTS="${MAX_CONCURRENT_SUBAGENTS:-4}"
-SUBAGENTS=false
+MAX_CONCURRENT_SUBAGENTS="${MAX_CONCURRENT_SUBAGENTS:-}"
+# Effort for spawned agents, independent of the parent's. Empty inherits the
+# Codex default. See the note above SUBAGENT_ARGS for why max is a poor choice.
+#
+# Low rather than medium: the gateway rounds medium up to high for GLM, and at
+# high a subagent handed an open-ended task keeps deliberating without ever
+# writing the closing `</think>`. The turn then comes back as one long block of
+# prose with no tool call, so the agent reports success having produced no
+# files. Measured against the worker on one broad task: low closed and called a
+# tool in ~1.5k characters, high ran past 76k and was still going.
+CODEX_SUBAGENT_REASONING_EFFORT="${CODEX_SUBAGENT_REASONING_EFFORT-low}"
 EXTERNAL_TOOLS="${CODEX_EXTERNAL_TOOLS:-false}"
 CODEX_CONTEXT_WINDOW="${CODEX_CONTEXT_WINDOW:-5000000}"
 CODEX_MAX_CONTEXT_WINDOW="${CODEX_MAX_CONTEXT_WINDOW:-}"
 CODEX_AUTO_COMPACT_TOKEN_LIMIT="${CODEX_AUTO_COMPACT_TOKEN_LIMIT:-4500000}"
 CODEX_REASONING_EFFORT="${CODEX_REASONING_EFFORT:-max}"
-
-# Codex version that supports the legacy multi-agent v1 config (plain tool names).
-SUBAGENT_CODEX_VERSION="0.132.0"
+# How long Codex waits on a silent stream before giving up. The marathon models
+# at max reasoning effort routinely think for longer than five minutes without
+# emitting a token, and a subagent's turn is one uninterrupted think with no
+# visible progress, so the old 300s ceiling cut off work that was still running.
+CODEX_STREAM_IDLE_TIMEOUT_MS="${CODEX_STREAM_IDLE_TIMEOUT_MS:-900000}"
+# Codex gates its subagent tools on this per-model catalog field. Only "v2" is
+# honored by current releases; "v1" registers nothing. Set to empty to opt out.
+# Unset defaults to v2; an explicitly empty value opts out, so use `-` not `:-`.
+CODEX_MULTI_AGENT_VERSION="${CODEX_MULTI_AGENT_VERSION-v2}"
 
 # Parse args (only when executed, not sourced)
 PASSTHRU=()
@@ -73,9 +92,17 @@ if [[ "${BASH_SOURCE[0]:-$0}" == "${0}" ]]; then
         CODEX_REASONING_EFFORT="${2:-}"
         shift 2
         ;;
-      --subagents)
-        SUBAGENTS=true
-        shift
+      --stream-idle-timeout)
+        CODEX_STREAM_IDLE_TIMEOUT_MS="${2:-}"
+        shift 2
+        ;;
+      --max-subagents)
+        MAX_CONCURRENT_SUBAGENTS="${2:-}"
+        shift 2
+        ;;
+      --subagent-effort)
+        CODEX_SUBAGENT_REASONING_EFFORT="${2:-}"
+        shift 2
         ;;
       --external-tools)
         EXTERNAL_TOOLS=true
@@ -134,7 +161,10 @@ while IFS= read -r model_id; do
 done <<< "${SUBCONSCIOUS_MODELS:-$DEFAULT_SUBCONSCIOUS_MODELS}"
 
 write_model_catalog() {
-  local catalog_file="$1" model_id vision_fields index=0
+  local catalog_file="$1" model_id vision_fields index=0 multi_agent_json="null"
+  if [[ -n "$CODEX_MULTI_AGENT_VERSION" ]]; then
+    multi_agent_json="\"${CODEX_MULTI_AGENT_VERSION}\""
+  fi
   {
     printf '{\n  "models": [\n'
     for model_id in "${SUPPORTED_MODELS[@]}"; do
@@ -154,7 +184,13 @@ write_model_catalog() {
       "max_context_window": ${CODEX_MAX_CONTEXT_WINDOW},
       "auto_compact_token_limit": ${CODEX_AUTO_COMPACT_TOKEN_LIMIT},
       "effective_context_window_percent": 95,
-      "supported_reasoning_levels": [],
+      "supported_reasoning_levels": [
+        { "effort": "none", "description": "No additional reasoning" },
+        { "effort": "low", "description": "Fast responses with lighter reasoning" },
+        { "effort": "medium", "description": "Balances speed and reasoning depth" },
+        { "effort": "high", "description": "Greater reasoning depth for complex problems" },
+        { "effort": "max", "description": "Maximum reasoning depth for the hardest problems" }
+      ],
       "shell_type": "shell_command",
       "visibility": "list",
       "supported_in_api": true,
@@ -175,6 +211,8 @@ write_model_catalog() {
       "apply_patch_tool_type": "freeform",
       "truncation_policy": { "mode": "tokens", "limit": 10000 },
       "supports_parallel_tool_calls": true,
+      "multi_agent_version": ${multi_agent_json},
+      "use_responses_lite": false,
       "experimental_supported_tools": []${vision_fields}
     }
 EOF
@@ -197,6 +235,41 @@ if [[ "$EXTERNAL_TOOLS" != "true" ]]; then
   )
 fi
 
+# Bound the subagent tree when the catalog turns it on. Codex still only spawns
+# a subagent when the user asks for one; these are ceilings, not defaults.
+#
+# Codex documents no nesting-depth limit, so a subagent can spawn its own
+# subagent and the tree can grow deeper than you asked for. Capping concurrency
+# is the only lever available.
+#
+# Subagent reasoning effort is set separately from the parent's on purpose: the
+# marathon models at max effort think for many minutes without emitting a
+# token, and a subagent turn is one uninterrupted think, so inheriting max
+# makes every delegated subtask look like a hang.
+# Applied after argument parsing so --max-subagents can win. Four is a floor
+# rather than a considered limit: Codex's own default is three, and exceeding
+# either one fails the spawn outright rather than queueing it, so a run that
+# wants more should say so instead of collecting retries.
+MAX_CONCURRENT_SUBAGENTS="${MAX_CONCURRENT_SUBAGENTS:-4}"
+
+SUBAGENT_ARGS=()
+if [[ -z "$CODEX_MULTI_AGENT_VERSION" ]]; then
+  # Clearing the catalog field alone only downgrades Codex to multi-agent v1,
+  # whose tools this gateway has never been exercised against. Turn the
+  # feature off outright instead.
+  SUBAGENT_ARGS=(-c agents.enabled=false)
+else
+  SUBAGENT_ARGS=(
+    -c agents.max_concurrent_threads_per_session="${MAX_CONCURRENT_SUBAGENTS}"
+    -c agents.interrupt_message=true
+  )
+  if [[ -n "$CODEX_SUBAGENT_REASONING_EFFORT" ]]; then
+    SUBAGENT_ARGS+=(
+      -c agents.default_subagent_reasoning_effort="${CODEX_SUBAGENT_REASONING_EFFORT}"
+    )
+  fi
+fi
+
 if [[ -z "$GATEWAY_URL" || -z "$API_KEY" ]]; then
   echo "error: GATEWAY_URL and API_KEY must be set in ../.env" >&2
   exit 1
@@ -206,6 +279,10 @@ export SUBCONSCIOUS_API_KEY="$API_KEY"
 export SUBCONSCIOUS_GATEWAY_URL="${GATEWAY_URL%/}"
 
 # Merge compaction hooks without replacing ~/.codex/hooks.json or config.toml.
+# `codex_ensure_hooks` returns early when they are already current, so a launch
+# that changes nothing writes nothing: Codex decides what counts as a new hook
+# from what is on disk, and rewriting an identical one reset the trust the user
+# had already granted.
 HOOK_SRC="${SCRIPT_DIR}/hook.sh"
 # shellcheck source=hooks-lib.sh
 source "${SCRIPT_DIR}/hooks-lib.sh"
@@ -220,43 +297,22 @@ write_model_catalog "$CATALOG_FILE"
 
 # If sourced, just export env and return.
 if [[ "${BASH_SOURCE[0]:-$0}" != "${0}" ]]; then
-  export GATEWAY_URL CATALOG_FILE MAX_CONCURRENT_SUBAGENTS SUBAGENTS
+  export GATEWAY_URL CATALOG_FILE MAX_CONCURRENT_SUBAGENTS CODEX_SUBAGENT_REASONING_EFFORT
   return 0 2>/dev/null || true
 fi
 
 # Ephemeral config via -c flags — nothing is written to ~/.codex/config.toml.
-if [[ "$SUBAGENTS" == "true" ]]; then
-  # Legacy multi-agent v1 config — plain tool names the model can resolve.
-  echo "Starting codex@${SUBAGENT_CODEX_VERSION} with subagents enabled (max ${MAX_CONCURRENT_SUBAGENTS} threads)..." >&2
-  exec npx -y "@openai/codex@${SUBAGENT_CODEX_VERSION}" \
-    -c model="${MODEL}" \
-    -c model_provider=subconscious \
-    -c model_catalog_json="${CATALOG_FILE}" \
-    -c model_reasoning_effort="${CODEX_REASONING_EFFORT}" \
-    -c web_search=disabled \
-    ${EXTERNAL_TOOL_ARGS[@]+"${EXTERNAL_TOOL_ARGS[@]}"} \
-    -c features.multi_agent=true \
-    -c agents.max_threads="${MAX_CONCURRENT_SUBAGENTS}" \
-    -c agents.max_depth=1 \
-    -c agents.interrupt_message=true \
-    -c model_providers.subconscious.name=Subconscious \
-    -c model_providers.subconscious.base_url="${GATEWAY_URL}/v1" \
-    -c model_providers.subconscious.wire_api=responses \
-    -c model_providers.subconscious.env_key=SUBCONSCIOUS_API_KEY \
-    -c model_providers.subconscious.stream_idle_timeout_ms=300000 \
-    ${PASSTHRU[@]+"${PASSTHRU[@]}"}
-else
-  exec codex \
-    -c model="${MODEL}" \
-    -c model_provider=subconscious \
-    -c model_catalog_json="${CATALOG_FILE}" \
-    -c model_reasoning_effort="${CODEX_REASONING_EFFORT}" \
-    -c web_search=disabled \
-    ${EXTERNAL_TOOL_ARGS[@]+"${EXTERNAL_TOOL_ARGS[@]}"} \
-    -c model_providers.subconscious.name=Subconscious \
-    -c model_providers.subconscious.base_url="${GATEWAY_URL}/v1" \
-    -c model_providers.subconscious.wire_api=responses \
-    -c model_providers.subconscious.env_key=SUBCONSCIOUS_API_KEY \
-    -c model_providers.subconscious.stream_idle_timeout_ms=300000 \
-    ${PASSTHRU[@]+"${PASSTHRU[@]}"}
-fi
+exec codex \
+  -c model="${MODEL}" \
+  -c model_provider=subconscious \
+  -c model_catalog_json="${CATALOG_FILE}" \
+  -c model_reasoning_effort="${CODEX_REASONING_EFFORT}" \
+  -c web_search=disabled \
+  ${EXTERNAL_TOOL_ARGS[@]+"${EXTERNAL_TOOL_ARGS[@]}"} \
+  ${SUBAGENT_ARGS[@]+"${SUBAGENT_ARGS[@]}"} \
+  -c model_providers.subconscious.name=Subconscious \
+  -c model_providers.subconscious.base_url="${GATEWAY_URL}/v1" \
+  -c model_providers.subconscious.wire_api=responses \
+  -c model_providers.subconscious.env_key=SUBCONSCIOUS_API_KEY \
+  -c model_providers.subconscious.stream_idle_timeout_ms="${CODEX_STREAM_IDLE_TIMEOUT_MS}" \
+  ${PASSTHRU[@]+"${PASSTHRU[@]}"}

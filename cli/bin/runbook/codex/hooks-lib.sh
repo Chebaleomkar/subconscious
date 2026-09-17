@@ -61,6 +61,30 @@ EOF
   chmod 600 "$HOOKS_ENV_FILE"
 }
 
+# True when our hooks, hook script and env file are all already in place and
+# current, so there is nothing to write.
+#
+# This matters more than it looks. Codex asks the user to trust a hook before
+# it will run one, and it decides what is "new" from what is on disk. Rewriting
+# an identical hook on every single launch meant the trust prompt never went
+# away and the compaction hooks never actually ran - we were re-introducing
+# ourselves as a stranger several times a day.
+codex_hooks_current() {
+  [[ -f "$HOOKS_JSON" ]] || return 1
+  codex_hooks_json_valid || return 1
+  [[ -x "$HOOK_DST" ]] || return 1
+  [[ -f "${HOOK_SRC:-}" ]] || return 1
+  cmp -s "$HOOK_SRC" "$HOOK_DST" || return 1
+  [[ -f "$HOOKS_ENV_FILE" ]] || return 1
+  grep -q "SUBCONSCIOUS_GATEWAY_URL='${GATEWAY_URL%/}'" "$HOOKS_ENV_FILE" || return 1
+  grep -q "SUBCONSCIOUS_API_KEY='${API_KEY}'" "$HOOKS_ENV_FILE" || return 1
+  # Our entry present under both compaction events, and exactly once each.
+  jq -e --arg m "$MARKER" '
+    def ours: [ .[]?.hooks[]? | select((.command // "") | tostring | contains($m)) ] | length;
+    (.hooks.PreCompact | ours) == 1 and (.hooks.PostCompact | ours) == 1
+  ' "$HOOKS_JSON" >/dev/null 2>&1
+}
+
 # codex_ensure_hooks [strict|best-effort]
 codex_ensure_hooks() {
   local mode="${1:-strict}"
@@ -91,12 +115,18 @@ codex_ensure_hooks() {
   if [[ ! -f "$HOOKS_JSON" ]]; then
     printf '%s\n' '{"hooks":{}}' >"$HOOKS_JSON"
   fi
+  if codex_hooks_current; then
+    # Already installed and unchanged. Saying nothing is the point: a message
+    # on every launch trains the user to ignore it, and rewriting the file
+    # would reset the trust they have already granted.
+    return 0
+  fi
   codex_write_hook_script
   codex_write_hooks_env
   codex_strip_hook_entries
   codex_append_hook_groups
-  echo "Merged Subconscious Codex hooks into $HOOKS_JSON"
-  echo "Trust new hooks in Codex with /hooks (or --dangerously-bypass-hook-trust)."
+  echo "Installed Subconscious compaction hooks in $HOOKS_JSON"
+  echo "These do not run until you trust them: type /hooks inside Codex once."
 }
 
 codex_uninstall_hooks() {

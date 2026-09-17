@@ -153,6 +153,7 @@ creates a secure default profile.
 | `subc marathon` | Launch the native Marathon agent (or `subc marathon install`) |
 | `subc claude` | Launch Claude Code |
 | `subc codex` | Launch Codex CLI (merges compaction hooks) |
+| `subc codex install` | Install Codex compaction hooks (then trust them with `/hooks`) |
 | `subc opencode` | Launch OpenCode |
 | `subc dsh` | Launch DeepSeek Harness with the live Subconscious model catalog |
 | `subc cursor install` | Configure Cursor hooks |

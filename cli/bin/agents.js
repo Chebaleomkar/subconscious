@@ -32,6 +32,15 @@ import { compareVersions } from './update-check.js';
 
 export const MIN_CLAUDE_CODE_VERSION = '2.1.242';
 
+// First Codex that honours `multi_agent_version: "v2"` in the model catalog,
+// found by installing each release and reading what it advertises: 0.142.5 and
+// below offer no subagent namespace at all, 0.143.0 offers `collaboration`.
+//
+// Below this the catalog field is not rejected, it is ignored - the run simply
+// has no subagents and nothing says why. That silence is the reason for a
+// version gate rather than a note in the docs.
+export const MIN_CODEX_VERSION = '0.143.0';
+
 // --- Registry (single source of truth, generated copy shipped in the package).
 const registry = JSON.parse(
   readFileSync(new URL('./registry.generated.json', import.meta.url), 'utf-8'),
@@ -193,10 +202,10 @@ const AGENT_HELP = {
   codex: {
     usage: 'subc [-p NAME] codex [help|install|status|uninstall] [Codex arguments...]',
     behavior:
-      'Launches Codex with a temporary Subconscious provider catalog. Compaction hooks are merged into ~/.codex/hooks.json and removed with subc codex uninstall.',
+      'Launches Codex with a temporary Subconscious provider catalog. Compaction hooks are merged into ~/.codex/hooks.json on first launch and removed with subc codex uninstall; Codex will not run them until you trust them with /hooks once.',
     options: [
       ['help', 'Show this help'],
-      ['install', 'Install only the Subconscious compaction hooks'],
+      ['install', 'Install the Subconscious compaction hooks (then trust with /hooks)'],
       ['status', 'Inspect the installed compaction hooks'],
       ['uninstall', 'Remove only the Subconscious Codex hooks'],
       ['--model MODEL', 'Override the profile model for this launch'],
@@ -205,7 +214,9 @@ const AGENT_HELP = {
       ['--auto-compact-token-limit N', 'Override the automatic compaction threshold'],
       ['--reasoning-effort LEVEL', 'Use none, low, medium, high, or max'],
       ['--external-tools', 'Enable Codex apps/plugins for this launch'],
-      ['--subagents', 'Use the pinned legacy Codex subagent mode'],
+      ['--stream-idle-timeout MS', 'Allow a longer silent think before timing out'],
+      ['--max-subagents N', 'Subagents allowed to run at once (default 4)'],
+      ['--subagent-effort LEVEL', 'Effort for subagents, separate from the parent'],
       ['-- ARGS...', 'Pass remaining arguments to Codex'],
     ],
   },
@@ -625,6 +636,10 @@ export function parseClaudeVersion(text) {
 }
 
 export function claudeVersionNeedsUpgrade(installed, minimum = MIN_CLAUDE_CODE_VERSION) {
+  return versionNeedsUpgrade(installed, minimum);
+}
+
+export function versionNeedsUpgrade(installed, minimum) {
   return Boolean(installed && minimum && compareVersions(installed, minimum) < 0);
 }
 
@@ -649,13 +664,20 @@ export function readClaudeVersion(bin, binDir, options = {}) {
   }
 }
 
+const MINIMUM_VERSIONS = {
+  'claude-code': { minimum: MIN_CLAUDE_CODE_VERSION, label: 'Claude Code' },
+  // Below this, subagents are silently absent rather than broken.
+  codex: { minimum: MIN_CODEX_VERSION, label: 'Codex' },
+};
+
 async function ensureClaudeCompatible(agent, binDir) {
-  if (agent.id !== 'claude-code') return;
+  const requirement = MINIMUM_VERSIONS[agent.id];
+  if (!requirement) return;
   const version = readClaudeVersion(agent.bin, binDir);
-  if (!claudeVersionNeedsUpgrade(version)) return;
+  if (!versionNeedsUpgrade(version, requirement.minimum)) return;
 
   console.error(
-    `\n  Minimum supported Claude Code version is ${MIN_CLAUDE_CODE_VERSION}. Your version is ${version}. Upgrade to get the best experience.\n`,
+    `\n  Minimum supported ${requirement.label} version is ${requirement.minimum}. Your version is ${version}. Upgrade to get the best experience.\n`,
   );
   console.error(`  Upgrade it with:`);
   console.error(`    ${c.cyan}${agent.install}${c.reset}`);

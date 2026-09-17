@@ -144,6 +144,28 @@ const SETTINGS = {
     type: 'integer',
     min: 1,
   },
+  CODEX_SUBAGENT_REASONING_EFFORT: {
+    key: 'CODEX_SUBAGENT_REASONING_EFFORT',
+    label: 'Subagent reasoning effort',
+    description:
+      'Effort for Codex subagents, set separately from the parent: a marathon model at max thinks for minutes without emitting a token, and a subagent turn is one uninterrupted think, so inheriting max makes every delegated subtask look like a hang.',
+    type: 'text',
+  },
+  CODEX_MULTI_AGENT_VERSION: {
+    key: 'CODEX_MULTI_AGENT_VERSION',
+    label: 'Codex multi-agent version',
+    description:
+      'Which subagent implementation Codex offers: v2 gives the collaboration tools. Leave empty to turn subagents off entirely.',
+    type: 'text',
+  },
+  CODEX_STREAM_IDLE_TIMEOUT_MS: {
+    key: 'CODEX_STREAM_IDLE_TIMEOUT_MS',
+    label: 'Stream idle timeout (ms)',
+    description:
+      'How long Codex waits on a silent stream before giving up. Needs to exceed the longest think the model will take.',
+    type: 'integer',
+    min: 1,
+  },
   MAX_SUBAGENT_SPAWN_DEPTH: {
     key: 'MAX_SUBAGENT_SPAWN_DEPTH',
     label: 'Subagent spawn depth',
@@ -305,6 +327,9 @@ const AGENT_SETTING_KEYS = {
     'CODEX_AUTO_COMPACT_TOKEN_LIMIT',
     'CODEX_REASONING_EFFORT',
     'CODEX_EXTERNAL_TOOLS',
+    'CODEX_STREAM_IDLE_TIMEOUT_MS',
+    'CODEX_MULTI_AGENT_VERSION',
+    'CODEX_SUBAGENT_REASONING_EFFORT',
     'MAX_CONCURRENT_SUBAGENTS',
   ],
   opencode: ['OPENCODE_API_KEY', 'OPENCODE_CONTEXT_LIMIT', 'OPENCODE_OUTPUT_LIMIT'],
