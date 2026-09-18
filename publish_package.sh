@@ -172,6 +172,18 @@ if [ -z "$NPM_USER" ]; then
 fi
 ok "Logged in to npm as ${BOLD}$NPM_USER${RESET}"
 
+# The cli package cross-compiles its TUI for six targets in prepack, so a
+# missing Go toolchain fails *after* the tag is cut, as a spawnSync ENOENT
+# from inside npm publish. Check it here where the message can be useful.
+if [ "$PKG_DIR" = "cli" ]; then
+  if ! command -v go >/dev/null 2>&1; then
+    fail "Go is not installed, and publishing ${BOLD}$PKG_NAME${RESET} builds the TUI for six platforms."
+    fail "Install it with ${BOLD}brew install go${RESET} (or from https://go.dev/dl/), then restart this script."
+    exit 1
+  fi
+  ok "Go toolchain present ($(go version | awk '{print $3}'))"
+fi
+
 echo ""
 echo -e "  ${GREEN}All checks passed.${RESET} This script will now:"
 echo ""
