@@ -146,18 +146,36 @@ function agentMenuItems() {
   }));
 }
 
-export async function writeAtomicJson(file, value) {
-  const tmp = `${file}.${process.pid}.${Math.random().toString(16).slice(2)}.tmp`;
-  await fs.writeFile(tmp, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+const ATOMIC_REPLACE_CODES = new Set(['EEXIST', 'EPERM', 'EACCES', 'EBUSY']);
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function replaceFile(tmp, file) {
   try {
     await fs.rename(tmp, file);
   } catch (error) {
-    if (error.code !== 'EEXIST' && error.code !== 'EPERM' && error.code !== 'EACCES') {
-      await fs.rm(tmp, { force: true });
-      throw error;
-    }
+    if (!ATOMIC_REPLACE_CODES.has(error.code)) throw error;
+    // Windows rejects a rename over a file another process still has open.
     await fs.rm(file, { force: true });
     await fs.rename(tmp, file);
+  }
+}
+
+export async function writeAtomicJson(file, value) {
+  const payload = `${JSON.stringify(value)}\n`;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const tmp = `${file}.${process.pid}.${Math.random().toString(16).slice(2)}.tmp`;
+    try {
+      await fs.writeFile(tmp, payload, { mode: 0o600 });
+      await replaceFile(tmp, file);
+      return;
+    } catch (error) {
+      await fs.rm(tmp, { force: true }).catch(() => {});
+      if (!ATOMIC_REPLACE_CODES.has(error.code) || attempt === 7) throw error;
+      await delay(20 * (attempt + 1));
+    }
   }
 }
 

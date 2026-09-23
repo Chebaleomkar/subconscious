@@ -13,6 +13,7 @@ import {
   resolveTuiExecutable,
   runTui,
   tuiSourceIsNewerThan,
+  writeAtomicJson,
 } from '../bin/tui.js';
 
 const testConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'subc-tui-test-'));
@@ -86,6 +87,34 @@ test('createTuiState includes resolved platform URL fields', async () => {
   assert.equal(state.platformOverridden, false);
   assert.equal(state.modelsLoading, false);
   assert.equal(state.sessionsLoading, false);
+});
+
+test('writeAtomicJson replaces a file that is being read', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'subc-atomic-json-'));
+  const file = path.join(dir, 'updates.json');
+  let stop = false;
+  const reader = (async () => {
+    while (!stop) {
+      try {
+        JSON.parse(await fs.readFile(file, 'utf8'));
+      } catch {
+        // A replace can leave a missing file for one poll.
+      }
+    }
+  })();
+
+  try {
+    for (let i = 0; i < 20; i++) {
+      await writeAtomicJson(file, { n: i, modelsLoading: false, sessionsLoading: false });
+    }
+    const last = JSON.parse(await fs.readFile(file, 'utf8'));
+    assert.equal(last.n, 19);
+    assert.equal(last.modelsLoading, false);
+    assert.equal(last.sessionsLoading, false);
+  } finally {
+    stop = true;
+    await reader;
+  }
 });
 
 test('createLocalTuiState stays on disk and marks remote data as loading', async () => {
