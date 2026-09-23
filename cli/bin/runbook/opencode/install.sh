@@ -55,6 +55,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../model-capabilities.generated.sh"
+source "${SCRIPT_DIR}/provider.sh"
 
 # Load shared env from SUBC_ENV_FILE, or a sibling .env / env.example.
 SHARED_ENV="${SUBC_ENV_FILE:-${SCRIPT_DIR}/../.env}"
@@ -147,19 +148,7 @@ while IFS= read -r model_id; do
   add_supported_model "$model_id"
 done <<< "${SUBCONSCIOUS_MODELS:-$DEFAULT_SUBCONSCIOUS_MODELS}"
 
-MODELS_JSON=""
-for model_id in "${SUPPORTED_MODELS[@]}"; do
-  vision_fields=""
-  if subc_model_supports_vision "$model_id"; then
-    vision_fields=',"attachment":true,"modalities":{"input":["text","image"],"output":["text"]}'
-  fi
-  model_json="\"${model_id}\":{\"name\":\"${model_id}\",\"tools\":true,\"limit\":{\"context\":${CONTEXT_LIMIT},\"output\":${OUTPUT_LIMIT}}${vision_fields}}"
-  if [[ -n "$MODELS_JSON" ]]; then
-    MODELS_JSON="${MODELS_JSON},${model_json}"
-  else
-    MODELS_JSON="$model_json"
-  fi
-done
+subc_opencode_build_models_json
 
 OPENCODE_DIR="${HOME}/.opencode"
 OPENCODE_CONFIG="${OPENCODE_DIR}/opencode.json"
@@ -186,34 +175,21 @@ require_cmds() {
 write_config() {
   mkdir -p "$OPENCODE_DIR"
   local base_url="${GATEWAY_URL%/}/v1"
-  local provider
-  provider=$(cat <<EOF
-{
-  "npm": "@ai-sdk/openai-compatible",
-  "name": "Subconscious Gateway",
-  "options": {
-    "baseURL": "${base_url}",
-    "apiKey": "{env:SUBCONSCIOUS_API_KEY}",
-    "headers": {
-      "x-subconscious-client": "opencode"
-    }
-  },
-  "models": {${MODELS_JSON}}
-}
-EOF
-)
+  local provider selected_model
+  provider="$(subc_opencode_build_provider_json "$base_url")"
+  selected_model="${SUBC_OPENCODE_PROVIDER_ID}/${MODEL}"
   if [[ -f "$OPENCODE_CONFIG" ]]; then
     local tmp
     tmp="$(mktemp)"
-    jq --argjson provider "$provider" --arg model "subconscious/${MODEL}" '
+    jq --argjson provider "$provider" --arg model "$selected_model" --arg provider_id "$SUBC_OPENCODE_PROVIDER_ID" '
       .provider = (.provider // {})
-      | .provider.subconscious = $provider
+      | .provider[$provider_id] = $provider
       | .model = $model
     ' "$OPENCODE_CONFIG" >"$tmp"
     mv "$tmp" "$OPENCODE_CONFIG"
   else
-    jq -n --argjson provider "$provider" --arg model "subconscious/${MODEL}" \
-      '{ "$schema": "https://opencode.ai/config.json", provider: {subconscious: $provider}, model: $model }' \
+    jq -n --argjson provider "$provider" --arg model "$selected_model" --arg provider_id "$SUBC_OPENCODE_PROVIDER_ID" \
+      '{ "$schema": "https://opencode.ai/config.json", provider: {($provider_id): $provider}, model: $model }' \
       >"$OPENCODE_CONFIG"
   fi
   local env_file="${OPENCODE_DIR}/subconscious.env"
@@ -240,7 +216,7 @@ uninstall_config() {
     local tmp
     tmp="$(mktemp)"
     jq '
-      del(.provider.subconscious)
+      del(.provider.subconscious, .provider["subconscious-cli"])
       | if ((.model // "") | tostring | startswith("subconscious/")) then del(.model) else . end
     ' "$OPENCODE_CONFIG" >"$tmp"
     mv "$tmp" "$OPENCODE_CONFIG"
