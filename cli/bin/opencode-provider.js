@@ -3,26 +3,23 @@ import { modelSupportsVision } from './model-capabilities.js';
 export const OPENCODE_PROVIDER_ID = 'subconscious';
 export const OPENCODE_PROVIDER_NAME = 'Subconscious Gateway';
 
-const DISPLAY_NAMES = {
-  'subconscious/glm-5.3-marathon': 'GLM 5.3 Marathon',
-  'subconscious/glm-5.2': 'GLM 5.2',
-  'subconscious/tim-qwen3.6-27b': 'TIM Qwen 3.6 27B',
-  'subconscious/deepseek-v4-flash-marathon': 'DeepSeek V4 Flash Marathon',
-  'subconscious/deepseek-v4.1-flash-marathon': 'DeepSeek V4.1 Flash Marathon',
-};
+const ACRONYMS = new Set(['gpt', 'oss', 'api', 'gguf', 'ggml', 'nomic', 'vl', 'it', 'mlx']);
 
-function titleCase(value) {
-  return value
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
+function formatToken(token) {
+  const lower = token.toLowerCase();
+  if (ACRONYMS.has(lower)) return token.toUpperCase();
+  if (/^\d+[bkmg]$/i.test(token)) return token.toUpperCase();
+  if (/^q\d+$/i.test(token)) return token.toUpperCase();
+  if (/^\d+\.\d+/.test(token)) return token;
+  if (/^[a-z]\d+[a-z]$/i.test(token) || /^\d+[a-z]$/i.test(token)) return token.toUpperCase();
+  return token.charAt(0).toUpperCase() + token.slice(1).toLowerCase();
 }
 
+/** Drop the subconscious/ prefix, then capitalize each dash-separated token. */
 export function opencodeModelDisplayName(modelId) {
-  if (DISPLAY_NAMES[modelId]) return DISPLAY_NAMES[modelId];
-  const slug = modelId.startsWith('subconscious/') ? modelId.slice('subconscious/'.length) : modelId;
-  return titleCase(slug.replace(/-/g, ' '));
+  const text = String(modelId ?? '').trim();
+  const slug = text.startsWith('subconscious/') ? text.slice('subconscious/'.length) : text;
+  return slug.split(/[-_]/).filter(Boolean).map(formatToken).join(' ');
 }
 
 export function buildOpenCodeModels(modelIds, { context, output }) {

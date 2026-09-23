@@ -7,22 +7,27 @@ SUBC_OPENCODE_PROVIDER_ID="subconscious"
 SUBC_OPENCODE_PROVIDER_NAME="Subconscious Gateway"
 
 subc_opencode_model_display_name() {
-  case "${1:-}" in
-    subconscious/glm-5.3-marathon) echo 'GLM 5.3 Marathon' ;;
-    subconscious/glm-5.2) echo 'GLM 5.2' ;;
-    subconscious/tim-qwen3.6-27b) echo 'TIM Qwen 3.6 27B' ;;
-    subconscious/deepseek-v4-flash-marathon) echo 'DeepSeek V4 Flash Marathon' ;;
-    subconscious/deepseek-v4.1-flash-marathon) echo 'DeepSeek V4.1 Flash Marathon' ;;
-    subconscious/*)
-      local slug="${1#subconscious/}"
-      slug="${slug//-/ }"
-      echo "$slug" | awk '{ for (i = 1; i <= NF; i++) { $i = toupper(substr($i, 1, 1)) substr($i, 2) } print }'
-      ;;
-    *)
-      local fallback="${1//-/ }"
-      echo "$fallback" | awk '{ for (i = 1; i <= NF; i++) { $i = toupper(substr($i, 1, 1)) substr($i, 2) } print }'
-      ;;
-  esac
+  local slug="${1:-}"
+  slug="${slug#subconscious/}"
+  echo "$slug" | awk -F '[-_]' '
+    function format_token(token, lower) {
+      lower = tolower(token)
+      if (lower ~ /^(gpt|oss|api|gguf|ggml|nomic|vl|it|mlx)$/) return toupper(token)
+      if (token ~ /^[0-9]+[bBkKmMgG]$/) return toupper(token)
+      if (token ~ /^[qQ][0-9]+$/) return toupper(token)
+      if (token ~ /^[0-9]+\.[0-9]+/) return token
+      if (token ~ /^[A-Za-z][0-9]+[A-Za-z]$/ || token ~ /^[0-9]+[A-Za-z]$/) return toupper(token)
+      return toupper(substr(token, 1, 1)) tolower(substr(token, 2))
+    }
+    {
+      out = ""
+      for (i = 1; i <= NF; i++) {
+        if ($i == "") continue
+        out = out (out == "" ? "" : " ") format_token($i)
+      }
+      print out
+    }
+  '
 }
 
 subc_opencode_build_whitelist_json() {

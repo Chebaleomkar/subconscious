@@ -58,7 +58,15 @@ test('OpenCode launch replaces the Subconscious catalog on every startup', () =>
   assert.equal(config.provider[OPENCODE_PROVIDER_ID].models['gw-glm-5.2'], undefined);
   assert.equal(
     config.provider[OPENCODE_PROVIDER_ID].models['subconscious/glm-5.2'].name,
-    'GLM 5.2',
+    'Glm 5.2',
+  );
+  assert.equal(
+    config.provider[OPENCODE_PROVIDER_ID].models['subconscious/tim-qwen3.6-27b'].name,
+    'Tim Qwen3.6 27B',
+  );
+  assert.equal(
+    config.provider[OPENCODE_PROVIDER_ID].models['subconscious/deepseek-v4-flash-marathon'].name,
+    'Deepseek V4 Flash Marathon',
   );
   for (const [id, model] of Object.entries(config.provider[OPENCODE_PROVIDER_ID].models)) {
     const vision = id === 'subconscious/deepseek-v4.1-flash-marathon';
@@ -106,7 +114,10 @@ test('the standalone OpenCode installer also advertises vision and preserves oth
   assert.equal(config.provider.subconscious.models['subconscious/deepseek-v4-flash-marathon'].attachment, undefined);
 });
 
-test('OpenCode model display names stay human readable', () => {
-  assert.equal(opencodeModelDisplayName('subconscious/glm-5.3-marathon'), 'GLM 5.3 Marathon');
+test('OpenCode model display names are capitalized from the id', () => {
+  assert.equal(opencodeModelDisplayName('subconscious/glm-5.3-marathon'), 'Glm 5.3 Marathon');
+  assert.equal(opencodeModelDisplayName('subconscious/tim-qwen3.6-27b'), 'Tim Qwen3.6 27B');
+  assert.equal(opencodeModelDisplayName('subconscious/deepseek-v4.1-flash-marathon'), 'Deepseek V4.1 Flash Marathon');
   assert.equal(opencodeModelDisplayName('subconscious/custom-model'), 'Custom Model');
+  assert.equal(opencodeModelDisplayName('subconscious/gpt-oss-20b'), 'GPT OSS 20B');
 });
