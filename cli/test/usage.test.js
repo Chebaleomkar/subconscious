@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  describeDailyAllowance,
+  formatAllowancePercent,
   formatCurrency,
   formatTokens,
   formatUsageDisplay,
@@ -41,6 +43,84 @@ test('isLegacyUsagePayload detects old quota-only responses', () => {
   );
 });
 
+test('formatAllowancePercent never rounds a remaining allowance up to 100', () => {
+  assert.equal(formatAllowancePercent(5.5), '6%');
+  assert.equal(formatAllowancePercent(99.6), '99%');
+  assert.equal(formatAllowancePercent(100), '100%');
+  assert.equal(formatAllowancePercent(140), '100%');
+});
+
+test('describeDailyAllowance computes a percent from the legacy token shape', () => {
+  assert.deepEqual(
+    describeDailyAllowance({
+      amount: 20_000_000,
+      units: 'tokens',
+      consumed: 12_400_000,
+      remaining: 7_600_000,
+    }),
+    { kind: 'tokens', percent: 62 },
+  );
+});
+
+test('formatUsageDisplay renders a credit allowance as a percent', () => {
+  const output = formatUsageDisplay({
+    billingMode: 'subscription',
+    plan: {
+      label: 'Heavy',
+      status: 'active',
+      isUnlimitedComp: false,
+      dailyAllowance: {
+        basis: 'credit',
+        percent: 5.5,
+        resetAt: '2026-09-24T00:00:00.000Z',
+      },
+    },
+    credits: { balanceDollars: 47479.24, overageThisPeriodDollars: 0 },
+    models: [{ slug: 'subconscious/glm-5.3-marathon', consumedToday: 44_500_000 }],
+  });
+
+  assert.match(output, /6% of daily credit used/);
+  assert.match(output, /Resets midnight UTC/);
+  assert.match(output, /\$47479\.24/);
+  assert.doesNotMatch(output, /\/ .* tokens/);
+  assert.doesNotMatch(output, /[Cc]ents/);
+});
+
+test('formatUsageDisplay warns when the daily credit is spent', () => {
+  const output = formatUsageDisplay({
+    billingMode: 'subscription',
+    plan: {
+      label: 'Heavy',
+      status: 'active',
+      isUnlimitedComp: false,
+      dailyAllowance: { basis: 'credit', percent: 112.4, resetAt: '2026-09-24T00:00:00.000Z' },
+    },
+    credits: { balanceDollars: 10, overageThisPeriodDollars: 1.2 },
+    models: [],
+  });
+
+  assert.match(output, /100% of daily credit used/);
+  assert.match(output, /Past today's allowance/);
+});
+
+test('formatUsageDisplay renders an unavailable daily credit', () => {
+  const output = formatUsageDisplay({
+    billingMode: 'subscription',
+    plan: {
+      label: 'Heavy',
+      status: 'active',
+      isUnlimitedComp: false,
+      dailyAllowance: { basis: 'unavailable', resetAt: '2026-09-24T00:00:00.000Z' },
+    },
+    credits: { balanceDollars: 10, overageThisPeriodDollars: 0 },
+    models: [],
+  });
+
+  assert.match(output, /Daily credit unavailable/);
+  assert.match(output, /could not be read just now/);
+  assert.doesNotMatch(output, /% of daily/);
+});
+
 test('formatUsageDisplay renders subscription meter and models', () => {
   const output = formatUsageDisplay({
     billingMode: 'subscription',
@@ -65,7 +145,8 @@ test('formatUsageDisplay renders subscription meter and models', () => {
 
   assert.match(output, /Subconscious Usage/);
   assert.match(output, /Pro · active/);
-  assert.match(output, /12\.4M \/ 20M tokens/);
+  assert.match(output, /62% of daily tokens used/);
+  assert.doesNotMatch(output, /12\.4M \/ 20M tokens/);
   assert.match(output, /\$42\.50/);
   assert.match(output, /tim-qwen3\.6-27b/);
 });
@@ -84,7 +165,7 @@ test('formatUsageDisplay renders unlimited comp without meter', () => {
   });
 
   assert.match(output, /Unlimited/);
-  assert.doesNotMatch(output, /Daily allowance[\s\S]*\/ .* tokens/);
+  assert.doesNotMatch(output, /% of daily/);
 });
 
 test('renderProgressBar fills proportionally', () => {
