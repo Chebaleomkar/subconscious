@@ -48,29 +48,43 @@ async function pathExists(file) {
   }
 }
 
+export async function tuiSourceIsNewerThan(binary, sourceFile = path.join(TUI_SOURCE_DIR, 'cmd/subc-tui/main.go')) {
+  try {
+    const [binaryStat, sourceStat] = await Promise.all([fs.stat(binary), fs.stat(sourceFile)]);
+    return sourceStat.mtimeMs > binaryStat.mtimeMs;
+  } catch {
+    return false;
+  }
+}
+
+function sourceTuiCommand() {
+  return {
+    command: 'go',
+    args: ['run', './cmd/subc-tui'],
+    cwd: TUI_SOURCE_DIR,
+  };
+}
+
 export async function resolveTuiExecutable(options = {}) {
   const override = options.binary || process.env.SUBC_TUI_BIN?.trim();
   if (override) {
     return { command: override, args: options.binaryArgs || [], cwd: undefined };
   }
 
+  const hasSource = await pathExists(path.join(TUI_SOURCE_DIR, 'go.mod'));
   const target = nativeTargetName(options.platform, options.arch);
   if (target) {
     const packaged = path.join(BIN_DIR, 'native', target);
-    if (await pathExists(packaged)) {
+    // Source checkouts keep a cached host binary for speed. If TUI source is
+    // newer, that cache is stale (for example it will reject --updates).
+    if (await pathExists(packaged) && !(hasSource && (await tuiSourceIsNewerThan(packaged)))) {
       return { command: packaged, args: [], cwd: undefined };
     }
   }
 
   // Source checkouts can run the TUI without committing native build output.
   // Published packages always contain a prebuilt platform binary.
-  if (await pathExists(path.join(TUI_SOURCE_DIR, 'go.mod'))) {
-    return {
-      command: 'go',
-      args: ['run', './cmd/subc-tui'],
-      cwd: TUI_SOURCE_DIR,
-    };
-  }
+  if (hasSource) return sourceTuiCommand();
   return null;
 }
 

@@ -12,6 +12,7 @@ import {
   nativeTargetName,
   resolveTuiExecutable,
   runTui,
+  tuiSourceIsNewerThan,
 } from '../bin/tui.js';
 
 const testConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), 'subc-tui-test-'));
@@ -40,6 +41,20 @@ test('SUBC_TUI_BIN overrides packaged and source-checkout binaries', async () =>
     args: [],
     cwd: undefined,
   });
+});
+
+test('source checkouts skip a native TUI binary older than the Go source', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'subc-stale-tui-'));
+  const binary = path.join(dir, 'subc-tui');
+  const source = path.join(dir, 'main.go');
+  const now = Date.now();
+  await fs.writeFile(binary, 'old');
+  await fs.utimes(binary, new Date(now - 10_000), new Date(now - 10_000));
+  await fs.writeFile(source, 'package main\n');
+  await fs.utimes(source, new Date(now), new Date(now));
+  assert.equal(await tuiSourceIsNewerThan(binary, source), true);
+  await fs.utimes(binary, new Date(now + 10_000), new Date(now + 10_000));
+  assert.equal(await tuiSourceIsNewerThan(binary, source), false);
 });
 
 test('TUI results can carry an inline base URL into the selected launch', () => {
