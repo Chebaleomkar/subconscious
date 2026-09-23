@@ -280,10 +280,20 @@ async function main() {
     return;
   }
 
-  const update = await showUpdateNotice();
-  if (update?.action === 'updated' || update?.action === 'cancel') return;
+  const launchTui =
+    !command &&
+    process.stdin.isTTY === true &&
+    process.stdout.isTTY === true &&
+    process.env.TERM !== 'dumb';
 
-  if (!command && process.stdin.isTTY === true && process.stdout.isTTY === true && process.env.TERM !== 'dumb') {
+  // The TUI opens immediately and surfaces catalog, session, and upgrade
+  // status itself. Keep the blocking npm prompt for explicit commands.
+  if (!launchTui) {
+    const update = await showUpdateNotice();
+    if (update?.action === 'updated' || update?.action === 'cancel') return;
+  }
+
+  if (launchTui) {
     const selection = await runTui({ profileName });
     if (!selection?.args?.length) return;
     if (selection.baseUrl?.trim()) {

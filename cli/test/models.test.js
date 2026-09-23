@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import {
   AVAILABLE_MODELS_PATH,
   fetchGatewayModels,
+  isAbortError,
   isLiveModelSource,
   normalizeModelIds,
   PUBLIC_MODELS_PATH,
@@ -219,4 +220,17 @@ test('resolveModelCatalog treats an empty public catalog as a packaged fallback'
   assert.equal(result.source, 'packaged');
   assert.match(result.error.message, /no usable model IDs/);
   assert.deepEqual(result.models, ['subconscious/custom', 'subconscious/default']);
+});
+
+test('resolveModelCatalog does not fall back when the caller aborts', async () => {
+  const controller = new AbortController();
+  const pending = resolveModelCatalog({
+    baseUrl: 'https://gateway.example',
+    apiKey: 'sk-test',
+    fallbackModels: ['subconscious/default'],
+    signal: controller.signal,
+    fetchImpl: () => new Promise(() => {}),
+  });
+  controller.abort();
+  await assert.rejects(pending, (error) => isAbortError(error));
 });

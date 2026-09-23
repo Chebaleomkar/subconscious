@@ -18,6 +18,27 @@ export function isLiveModelSource(source) {
   return source === 'available' || source === 'public';
 }
 
+export function isAbortError(error) {
+  return error?.name === 'AbortError' || error?.code === 'ABORT_ERR';
+}
+
+function linkAbortSignal(controller, signal) {
+  if (!signal) return () => {};
+  if (signal.aborted) {
+    controller.abort();
+    return () => {};
+  }
+  const onAbort = () => controller.abort();
+  signal.addEventListener('abort', onAbort, { once: true });
+  return () => signal.removeEventListener('abort', onAbort);
+}
+
+function abortError(message) {
+  const error = new Error(message);
+  error.name = 'AbortError';
+  return error;
+}
+
 export function normalizeModelIds(modelIds = [], selectedModel) {
   const models = [];
   const seen = new Set();
@@ -53,6 +74,7 @@ export async function fetchGatewayModels({
   path = PUBLIC_MODELS_PATH,
   fetchImpl = globalThis.fetch,
   timeoutMs = DEFAULT_MODEL_FETCH_TIMEOUT_MS,
+  signal,
 }) {
   if (typeof fetchImpl !== 'function') {
     throw new Error('This Node.js version does not support fetch');
@@ -71,14 +93,26 @@ export async function fetchGatewayModels({
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   timeout.unref?.();
+  const unlink = linkAbortSignal(controller, signal);
 
   try {
-    const response = await fetchImpl(endpoint, {
-      method: 'GET',
-      headers,
-      cache: 'no-store',
-      signal: controller.signal,
+    if (signal?.aborted) throw abortError('Model discovery was cancelled');
+    const aborted = new Promise((_, reject) => {
+      const fail = () => {
+        if (signal?.aborted) reject(abortError('Model discovery was cancelled'));
+        else reject(new Error(`Model discovery timed out after ${timeoutMs}ms`));
+      };
+      controller.signal.addEventListener('abort', fail, { once: true });
     });
+    const response = await Promise.race([
+      fetchImpl(endpoint, {
+        method: 'GET',
+        headers,
+        cache: 'no-store',
+        signal: controller.signal,
+      }),
+      aborted,
+    ]);
 
     if (!response.ok) {
       throw new Error(`Model discovery returned HTTP ${response.status}`);
@@ -91,21 +125,24 @@ export async function fetchGatewayModels({
 
     return normalizeModelIds(payload.data.map((model) => model?.id));
   } catch (error) {
+    if (signal?.aborted) throw abortError('Model discovery was cancelled');
     if (controller.signal.aborted) {
       throw new Error(`Model discovery timed out after ${timeoutMs}ms`);
     }
     throw error;
   } finally {
+    unlink();
     clearTimeout(timeout);
   }
 }
 
-async function fetchPublicModels({ baseUrl, fetchImpl, timeoutMs }) {
+async function fetchPublicModels({ baseUrl, fetchImpl, timeoutMs, signal }) {
   const models = await fetchGatewayModels({
     baseUrl,
     path: PUBLIC_MODELS_PATH,
     fetchImpl,
     timeoutMs,
+    signal,
   });
   if (!models.length) throw new Error('Model discovery returned no usable model IDs');
   return models;
@@ -134,6 +171,7 @@ export async function resolveModelCatalog({
   fallbackModels = [],
   fetchImpl = globalThis.fetch,
   timeoutMs = DEFAULT_MODEL_FETCH_TIMEOUT_MS,
+  signal,
 }) {
   const key = apiKey?.trim() || '';
 
@@ -145,22 +183,26 @@ export async function resolveModelCatalog({
         path: AVAILABLE_MODELS_PATH,
         fetchImpl,
         timeoutMs,
+        signal,
       });
       return liveCatalog(discovered, selectedModel, 'available');
     } catch (availableError) {
+      if (isAbortError(availableError) || signal?.aborted) throw availableError;
       try {
-        const discovered = await fetchPublicModels({ baseUrl, fetchImpl, timeoutMs });
+        const discovered = await fetchPublicModels({ baseUrl, fetchImpl, timeoutMs, signal });
         return liveCatalog(discovered, selectedModel, 'public');
-      } catch {
+      } catch (publicError) {
+        if (isAbortError(publicError) || signal?.aborted) throw publicError;
         return packagedCatalog(selectedModel, fallbackModels, availableError);
       }
     }
   }
 
   try {
-    const discovered = await fetchPublicModels({ baseUrl, fetchImpl, timeoutMs });
+    const discovered = await fetchPublicModels({ baseUrl, fetchImpl, timeoutMs, signal });
     return liveCatalog(discovered, selectedModel, 'public');
   } catch (error) {
+    if (isAbortError(error) || signal?.aborted) throw error;
     return packagedCatalog(selectedModel, fallbackModels, error);
   }
 }
