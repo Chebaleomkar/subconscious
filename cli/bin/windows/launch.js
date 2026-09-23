@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { claudeNativeLaunch } from './claude.js';
+import { buildOpenCodeConfig } from '../opencode-provider.js';
 import { modelSupportsVision } from '../model-capabilities.js';
 import { defaults, value, origin, modelIds, positiveInteger, parseOptions, writeJson } from './common.js';
 
@@ -26,16 +27,9 @@ export async function windowsLaunch(id, argv, env, { tempRoot = os.tmpdir() } = 
   if (id === 'opencode') {
     const context = positiveInteger(value(env, 'OPENCODE_CONTEXT_LIMIT', '5000000'), 'OPENCODE_CONTEXT_LIMIT');
     const output = positiveInteger(value(env, 'OPENCODE_OUTPUT_LIMIT', '65536'), 'OPENCODE_OUTPUT_LIMIT');
-    const models = Object.fromEntries(modelIds(env).map(id => [id, {
-      name: id, tools: true, limit: { context, output },
-      ...(modelSupportsVision(id) ? { attachment: true, modalities: { input: ['text', 'image'], output: ['text'] } } : {}),
-    }]));
-    childEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify({
-      $schema: 'https://opencode.ai/config.json', disabled_providers: ['subconscious'],
-      provider: { 'subconscious-cli': { npm: '@ai-sdk/openai-compatible', name: 'Subconscious Gateway', options: {
-        baseURL: `${base}/v1`, apiKey: '{env:SUBCONSCIOUS_API_KEY}', headers: { 'x-subconscious-client': 'opencode' },
-      }, models } }, model: `subconscious-cli/${model}`,
-    });
+    childEnv.OPENCODE_CONFIG_CONTENT = JSON.stringify(
+      buildOpenCodeConfig({ baseUrl: base, model, modelIds: modelIds(env), context, output }),
+    );
     return { command: 'opencode', args: parseOptions(argv, {}).rest, env: childEnv };
   }
   if (id === 'codex') {

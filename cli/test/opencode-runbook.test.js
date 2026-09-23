@@ -4,6 +4,11 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
+import {
+  OPENCODE_PROVIDER_ID,
+  OPENCODE_PROVIDER_NAME,
+  opencodeModelDisplayName,
+} from '../bin/opencode-provider.js';
 
 const testDir = await fs.mkdtemp(path.join(os.tmpdir(), 'subc-opencode-test-'));
 const fakeOpenCode = path.join(testDir, 'opencode');
@@ -40,12 +45,30 @@ test('OpenCode launch replaces the Subconscious catalog on every startup', () =>
 
   assert.equal(result.status, 0, result.stderr);
   const config = JSON.parse(result.stdout);
-  assert.deepEqual(config.disabled_providers, ['subconscious']);
-  assert.deepEqual(Object.keys(config.provider), ['subconscious-cli']);
-  assert.deepEqual(Object.keys(config.provider['subconscious-cli'].models), models);
-  assert.equal(config.model, `subconscious-cli/${models[0]}`);
-  assert.equal(config.provider['subconscious-cli'].models['gw-glm-5.2'], undefined);
-  for (const [id, model] of Object.entries(config.provider['subconscious-cli'].models)) {
+  assert.deepEqual(config.disabled_providers, ['subconscious-cli']);
+  assert.deepEqual(Object.keys(config.provider), [OPENCODE_PROVIDER_ID]);
+  assert.equal(config.provider[OPENCODE_PROVIDER_ID].name, OPENCODE_PROVIDER_NAME);
+  assert.deepEqual(config.provider[OPENCODE_PROVIDER_ID].whitelist, models);
+  assert.equal(
+    config.provider[OPENCODE_PROVIDER_ID].options.modelsDiscovery.enabled,
+    false,
+  );
+  assert.deepEqual(Object.keys(config.provider[OPENCODE_PROVIDER_ID].models), models);
+  assert.equal(config.model, `${OPENCODE_PROVIDER_ID}/${models[0]}`);
+  assert.equal(config.provider[OPENCODE_PROVIDER_ID].models['gw-glm-5.2'], undefined);
+  assert.equal(
+    config.provider[OPENCODE_PROVIDER_ID].models['subconscious/glm-5.2'].name,
+    'Glm 5.2',
+  );
+  assert.equal(
+    config.provider[OPENCODE_PROVIDER_ID].models['subconscious/tim-qwen3.6-27b'].name,
+    'Tim Qwen3.6 27B',
+  );
+  assert.equal(
+    config.provider[OPENCODE_PROVIDER_ID].models['subconscious/deepseek-v4-flash-marathon'].name,
+    'Deepseek V4 Flash Marathon',
+  );
+  for (const [id, model] of Object.entries(config.provider[OPENCODE_PROVIDER_ID].models)) {
     const vision = id === 'subconscious/deepseek-v4.1-flash-marathon';
     assert.equal(model.attachment, vision ? true : undefined, id);
     assert.deepEqual(model.modalities, vision ? { input: ['text', 'image'], output: ['text'] } : undefined, id);
@@ -63,8 +86,8 @@ test('OpenCode enables vision for an explicitly selected model missing from the 
   });
   assert.equal(result.status, 0, result.stderr);
   const config = JSON.parse(result.stdout);
-  assert.equal(config.model, `subconscious-cli/${model}`);
-  assert.equal(config.provider['subconscious-cli'].models[model].attachment, true);
+  assert.equal(config.model, `${OPENCODE_PROVIDER_ID}/${model}`);
+  assert.equal(config.provider[OPENCODE_PROVIDER_ID].models[model].attachment, true);
 });
 
 test('the standalone OpenCode installer also advertises vision and preserves other providers', async () => {
@@ -84,7 +107,17 @@ test('the standalone OpenCode installer also advertises vision and preserves oth
   assert.equal(result.status, 0, result.stderr);
   const config = JSON.parse(await fs.readFile(file, 'utf8'));
   assert.deepEqual(config.provider.other, { models: { keep: {} } });
+  assert.equal(config.provider.subconscious.name, OPENCODE_PROVIDER_NAME);
+  assert.equal(config.model, `${OPENCODE_PROVIDER_ID}/${model}`);
   assert.equal(config.provider.subconscious.models[model].attachment, true);
   assert.deepEqual(config.provider.subconscious.models[model].modalities, { input: ['text', 'image'], output: ['text'] });
   assert.equal(config.provider.subconscious.models['subconscious/deepseek-v4-flash-marathon'].attachment, undefined);
+});
+
+test('OpenCode model display names are capitalized from the id', () => {
+  assert.equal(opencodeModelDisplayName('subconscious/glm-5.3-marathon'), 'Glm 5.3 Marathon');
+  assert.equal(opencodeModelDisplayName('subconscious/tim-qwen3.6-27b'), 'Tim Qwen3.6 27B');
+  assert.equal(opencodeModelDisplayName('subconscious/deepseek-v4.1-flash-marathon'), 'Deepseek V4.1 Flash Marathon');
+  assert.equal(opencodeModelDisplayName('subconscious/custom-model'), 'Custom Model');
+  assert.equal(opencodeModelDisplayName('subconscious/gpt-oss-20b'), 'GPT OSS 20B');
 });

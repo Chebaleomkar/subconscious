@@ -212,8 +212,8 @@ for (const selectedVision of [true, false]) test(`Windows harness vision metadat
 
   const oc = await windowsLaunch('opencode', [], environment);
   const ocConfig = JSON.parse(oc.env.OPENCODE_CONFIG_CONTENT);
-  assert.equal(ocConfig.model, `subconscious-cli/${environment.MODEL}`);
-  for (const [id, model] of Object.entries(ocConfig.provider['subconscious-cli'].models)) {
+  assert.equal(ocConfig.model, `subconscious/${environment.MODEL}`);
+  for (const [id, model] of Object.entries(ocConfig.provider.subconscious.models)) {
     assert.equal(model.attachment, id === visionModel ? true : undefined, id);
     assert.deepEqual(model.modalities, id === visionModel ? { input: ['text', 'image'], output: ['text'] } : undefined, id);
   }
@@ -250,11 +250,12 @@ for (const selectedVision of [true, false]) test(`Windows harness vision metadat
 test('OpenCode, Pi and sc have independent native launch specifications', async () => {
   const oc = await windowsLaunch('opencode', ['--', '--continue'], { ...env, OPENCODE_CONTEXT_LIMIT: '123456', OPENCODE_OUTPUT_LIMIT: '7890' });
   const config = JSON.parse(oc.env.OPENCODE_CONFIG_CONTENT);
-  assert.equal(config.provider['subconscious-cli'].options.baseURL, 'https://gateway.example/v1');
-  assert.equal(config.provider['subconscious-cli'].options.apiKey, '{env:SUBCONSCIOUS_API_KEY}');
-  assert.deepEqual(Object.keys(config.provider['subconscious-cli'].models), [env.MODEL, 'custom/model']);
+  assert.equal(config.provider.subconscious.options.baseURL, 'https://gateway.example/v1');
+  assert.equal(config.provider.subconscious.options.apiKey, '{env:SUBCONSCIOUS_API_KEY}');
+  assert.equal(config.provider.subconscious.options.modelsDiscovery.enabled, false);
+  assert.deepEqual(Object.keys(config.provider.subconscious.models), [env.MODEL, 'custom/model']);
   assert.ok(!oc.env.OPENCODE_CONFIG_CONTENT.includes('sk-test'));
-  assert.deepEqual(config.provider['subconscious-cli'].models[env.MODEL].limit, { context: 123456, output: 7890 });
+  assert.deepEqual(config.provider.subconscious.models[env.MODEL].limit, { context: 123456, output: 7890 });
   assert.deepEqual(oc.args, ['--continue']);
   assert.deepEqual((await windowsLaunch('pi', ['--continue'], env)).args, ['--provider', 'subconscious', '--model', env.MODEL, '--continue']);
   const sc = await windowsLaunch('subconscious-code', ['--prompt', 'x & y'], env);

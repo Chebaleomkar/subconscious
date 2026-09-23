@@ -145,14 +145,17 @@ func TestAccountStatusLivesOnlyInHeader(t *testing.T) {
 }
 
 func TestCatalogStatusLabelReflectsDiscoverySource(t *testing.T) {
-	if got := catalogStatusLabel("available", ""); got != "Provisioned models" {
+	if got := catalogStatusLabel("available", "", false); got != "Provisioned models" {
 		t.Fatalf("available label = %q", got)
 	}
-	if got := catalogStatusLabel("public", ""); got != "Public catalog" {
+	if got := catalogStatusLabel("public", "", false); got != "Public catalog" {
 		t.Fatalf("public label = %q", got)
 	}
-	if got := catalogStatusLabel("packaged", "timeout"); got != "Packaged defaults" {
+	if got := catalogStatusLabel("packaged", "timeout", false); got != "Packaged defaults" {
 		t.Fatalf("packaged label = %q", got)
+	}
+	if got := catalogStatusLabel("packaged", "", true); got != "Fetching catalog..." {
+		t.Fatalf("loading label = %q", got)
 	}
 }
 
@@ -394,5 +397,109 @@ func TestSessionsMenuSupportsNativeAndCrossHarnessResume(t *testing.T) {
 	want := []string{"-p", "default", "sessions", "resume", "claude:session-1", "--harness", "codex"}
 	if !reflect.DeepEqual(m.result.Args, want) {
 		t.Fatalf("session result = %#v, want %#v", m.result.Args, want)
+	}
+}
+
+func TestApplyStatePatchKeepsMainCursorAndClampsLists(t *testing.T) {
+	m := newModel(inputState{
+		ActiveProfile:   "default",
+		SelectedModel:   "subconscious/old",
+		Models:          []string{"subconscious/old", "subconscious/two"},
+		ModelsLoading:   true,
+		SessionsLoading: true,
+		Sessions: []sessionState{
+			{Key: "claude:a", Harness: "claude", HarnessName: "Claude Code", Title: "A"},
+			{Key: "claude:b", Harness: "claude", HarnessName: "Claude Code", Title: "B"},
+		},
+		Agents: []agentState{{Command: "claude", Name: "Claude Code", Action: "Launch", Launch: true}},
+	})
+	m.cursor = 3
+	m.modelCursor = 2
+	m.sessionCursor = 1
+
+	models := []string{"subconscious/live"}
+	sessions := []sessionState{{Key: "codex:1", Harness: "codex", HarnessName: "Codex CLI", Title: "Next"}}
+	done := false
+	source := "available"
+	m = applyStatePatch(m, statePatch{
+		Models:          &models,
+		ModelSource:     &source,
+		ModelsLoading:   &done,
+		Sessions:        &sessions,
+		SessionsLoading: &done,
+	})
+	if m.cursor != 3 {
+		t.Fatalf("main cursor reset: %d", m.cursor)
+	}
+	if m.sessionCursor != 0 {
+		t.Fatalf("session cursor = %d, want 0 after list shrink", m.sessionCursor)
+	}
+	if m.state.ModelsLoading || m.state.SessionsLoading {
+		t.Fatalf("loading flags still set: %#v", m.state)
+	}
+	if m.state.ModelSource != "available" {
+		t.Fatalf("source = %q", m.state.ModelSource)
+	}
+	if len(m.state.Sessions) != 1 || m.state.Sessions[0].Key != "codex:1" {
+		t.Fatalf("sessions = %#v", m.state.Sessions)
+	}
+}
+
+func TestLoadingViewsShowInFlightCopy(t *testing.T) {
+	m := newModel(inputState{
+		ActiveProfile:   "default",
+		ModelsLoading:   true,
+		SessionsLoading: true,
+		Agents:          []agentState{{Command: "claude", Name: "Claude Code", Action: "Launch", Launch: true}},
+	})
+	m.width = 100
+	m.height = 40
+	if header := m.renderHeader(m.width); !strings.Contains(header, "Fetching catalog...") {
+		t.Fatalf("header missing fetching label: %q", header)
+	}
+	for index, item := range m.items {
+		if item.Command == "models" {
+			m.cursor = index
+			break
+		}
+	}
+	if detail := m.renderDetail(56); !strings.Contains(detail, "Fetching catalog...") {
+		t.Fatalf("models detail missing fetching label: %q", detail)
+	}
+	for index, item := range m.items {
+		if item.Kind == itemSessions {
+			m.cursor = index
+			break
+		}
+	}
+	if detail := m.renderDetail(56); !strings.Contains(detail, "Scanning local sessions...") {
+		t.Fatalf("sessions detail missing scanning label: %q", detail)
+	}
+	footer := m.loadingFooter()
+	if !strings.Contains(footer, "Fetching catalog...") || !strings.Contains(footer, "Scanning sessions...") {
+		t.Fatalf("loading footer = %q", footer)
+	}
+}
+
+func TestUpdateAvailableFooter(t *testing.T) {
+	m := newModel(inputState{
+		ActiveProfile:   "default",
+		UpdateAvailable: true,
+		LatestVersion:   "4.2.0",
+		Agents:          []agentState{{Command: "claude", Name: "Claude Code", Action: "Launch", Launch: true}},
+	})
+	m.width = 100
+	m.height = 40
+	if view := m.renderMain(m.width); !strings.Contains(view, "CLI update available. Run subc upgrade.") {
+		t.Fatalf("update footer missing: %q", view)
+	}
+}
+
+func TestDefaultModelDisplayUsesFetchingLabelWhileLoading(t *testing.T) {
+	if got := defaultModelDisplay(inputState{ModelsLoading: true}); got != "Fetching catalog..." {
+		t.Fatalf("unset loading display = %q", got)
+	}
+	if got := defaultModelDisplay(inputState{SelectedModel: "subconscious/foo", ModelsLoading: true}); got != "subconscious/foo" {
+		t.Fatalf("selected loading display = %q", got)
 	}
 }

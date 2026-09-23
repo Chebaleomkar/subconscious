@@ -56,6 +56,33 @@ export function renderProgressBar(percentage, width = 20) {
   return `${color}${'█'.repeat(filled)}${c.dim}${'░'.repeat(empty)}${c.reset}`;
 }
 
+/**
+ * Whole percent. Never rounds up to 100 while allowance remains — a meter
+ * that reads 100% claims the day is spent.
+ */
+export function formatAllowancePercent(percent) {
+  const n = Number(percent);
+  if (!Number.isFinite(n) || n <= 0) return '0%';
+  const whole = Math.round(n);
+  if (n >= 100) return '100%';
+  if (whole >= 100) return '99%';
+  return `${whole}%`;
+}
+
+/** New percent payloads, or the pre-basis token shape (consumed / amount). */
+export function describeDailyAllowance(allowance) {
+  if (!allowance || typeof allowance !== 'object') return null;
+  if (allowance.basis === 'unavailable') return { kind: 'unavailable' };
+  if (allowance.basis === 'credit' || allowance.basis === 'tokens') {
+    return { kind: allowance.basis, percent: Number(allowance.percent) || 0 };
+  }
+
+  const consumed = Number(allowance.consumed) || 0;
+  const amount = Number(allowance.amount) || 0;
+  if (amount <= 0) return null;
+  return { kind: 'tokens', percent: (consumed / amount) * 100 };
+}
+
 export function formatUsageDisplay(data) {
   const lines = [];
   lines.push(`\n  ${c.bold}Subconscious Usage${c.reset}\n`);
@@ -81,24 +108,29 @@ export function formatUsageDisplay(data) {
     lines.push('');
     lines.push(`  ${c.dim}Daily allowance${c.reset}`);
     lines.push(`  ${c.green}Unlimited${c.reset} ${c.dim}(comp)${c.reset}`);
-  } else if (allowance && allowance.amount > 0) {
-    const consumed = Number(allowance.consumed) || 0;
-    const amount = Number(allowance.amount) || 0;
-    const remaining = Number(allowance.remaining) || 0;
-    const pct = amount > 0 ? Math.min((consumed / amount) * 100, 100) : 0;
-    const overage = Math.max(0, consumed - amount);
-
-    lines.push('');
-    lines.push(`  ${c.dim}Daily allowance${c.reset}`);
-    lines.push(
-      `  ${renderProgressBar(pct)}  ${formatTokens(consumed)} / ${formatTokens(amount)} tokens`,
-    );
-    const resetNote = allowance.resetAt
-      ? `${formatTokens(remaining)} remaining · resets midnight UTC`
-      : `${formatTokens(remaining)} remaining`;
-    lines.push(`  ${c.dim}${resetNote}${c.reset}`);
-    if (overage > 0) {
-      lines.push(`  ${c.yellow}+${formatTokens(overage)} over daily allowance${c.reset}`);
+  } else {
+    const described = describeDailyAllowance(allowance);
+    if (described) {
+      lines.push('');
+      lines.push(`  ${c.dim}Daily allowance${c.reset}`);
+      if (described.kind === 'unavailable') {
+        lines.push(`  ${c.dim}Daily credit unavailable${c.reset}`);
+        lines.push(
+          `  ${c.dim}Today's credit usage could not be read just now. Your plan and access are unaffected, and the figure returns on its own.${c.reset}`,
+        );
+      } else {
+        const label =
+          described.kind === 'credit' ? 'of daily credit used' : 'of daily tokens used';
+        lines.push(
+          `  ${renderProgressBar(described.percent)}  ${formatAllowancePercent(described.percent)} ${label}`,
+        );
+        lines.push(`  ${c.dim}Resets midnight UTC${c.reset}`);
+        if (described.kind === 'credit' && described.percent >= 100) {
+          lines.push(
+            `  ${c.yellow}Past today's allowance - further usage bills from your balance.${c.reset}`,
+          );
+        }
+      }
     }
   }
 
@@ -221,7 +253,7 @@ Usage:
   subc usage --json
   subc usage help
 
-Show billing mode, daily token allowance, credit balance, and per-model usage
+Show billing mode, daily allowance, credit balance, and per-model usage
 for the authenticated organization.
 
   --json   Print the raw platform JSON response

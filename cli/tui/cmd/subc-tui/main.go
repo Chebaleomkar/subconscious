@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
@@ -17,6 +18,9 @@ import (
 )
 
 const unsetSetting = "UNSET"
+const updatesPollInterval = 80 * time.Millisecond
+
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"}
 
 const (
 	brandOrange = "#FF5C27"
@@ -86,10 +90,27 @@ type inputState struct {
 	PlatformOverridden bool                  `json:"platformOverridden"`
 	ModelError         string                `json:"modelError"`
 	ModelSource        string                `json:"modelSource"`
+	ModelsLoading      bool                  `json:"modelsLoading"`
+	SessionsLoading    bool                  `json:"sessionsLoading"`
 	Sessions           []sessionState        `json:"sessions"`
 	SessionHarnesses   []sessionHarnessState `json:"sessionHarnesses"`
 	Agents             []agentState          `json:"agents"`
+	UpdateAvailable    bool                  `json:"updateAvailable"`
+	LatestVersion      string                `json:"latestVersion"`
 }
+
+type statePatch struct {
+	Models          *[]string       `json:"models"`
+	ModelError      *string         `json:"modelError"`
+	ModelSource     *string         `json:"modelSource"`
+	ModelsLoading   *bool           `json:"modelsLoading"`
+	Sessions        *[]sessionState `json:"sessions"`
+	SessionsLoading *bool           `json:"sessionsLoading"`
+	UpdateAvailable *bool           `json:"updateAvailable"`
+	LatestVersion   *string         `json:"latestVersion"`
+}
+
+type updatesTickMsg struct{}
 
 type outputResult struct {
 	Args    []string `json:"args"`
@@ -152,6 +173,9 @@ type model struct {
 	width           int
 	height          int
 	result          outputResult
+	updatesPath     string
+	spinnerFrame    int
+	lastUpdatesMod  time.Time
 }
 
 func newModel(state inputState) model {
@@ -216,13 +240,111 @@ func normalizeState(state inputState) inputState {
 	return state
 }
 
-func (m model) Init() tea.Cmd { return nil }
+func clampCursor(cursor, length int) int {
+	if length <= 0 {
+		return 0
+	}
+	if cursor >= length {
+		return length - 1
+	}
+	if cursor < 0 {
+		return 0
+	}
+	return cursor
+}
+
+func applyStatePatch(m model, patch statePatch) model {
+	if patch.Models != nil {
+		m.state.Models = *patch.Models
+	}
+	if patch.ModelError != nil {
+		m.state.ModelError = *patch.ModelError
+	}
+	if patch.ModelSource != nil {
+		m.state.ModelSource = *patch.ModelSource
+	}
+	if patch.ModelsLoading != nil {
+		m.state.ModelsLoading = *patch.ModelsLoading
+	}
+	if patch.Sessions != nil {
+		m.state.Sessions = *patch.Sessions
+	}
+	if patch.SessionsLoading != nil {
+		m.state.SessionsLoading = *patch.SessionsLoading
+	}
+	if patch.UpdateAvailable != nil {
+		m.state.UpdateAvailable = *patch.UpdateAvailable
+	}
+	if patch.LatestVersion != nil {
+		m.state.LatestVersion = *patch.LatestVersion
+	}
+	m.state = normalizeState(m.state)
+	m.modelCursor = clampCursor(m.modelCursor, len(defaultModelOptions(m.state)))
+	m.subagentCursor = clampCursor(m.subagentCursor, len(subagentModelOptions(m.state)))
+	m.sessionCursor = clampCursor(m.sessionCursor, len(m.state.Sessions))
+	return m
+}
+
+func readStatePatch(path string, lastMod *time.Time) (statePatch, bool) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return statePatch{}, false
+	}
+	if !info.ModTime().After(*lastMod) {
+		return statePatch{}, false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return statePatch{}, false
+	}
+	var patch statePatch
+	if err := json.Unmarshal(data, &patch); err != nil {
+		return statePatch{}, false
+	}
+	*lastMod = info.ModTime()
+	return patch, true
+}
+
+func (m model) isLoading() bool {
+	return m.state.ModelsLoading || m.state.SessionsLoading
+}
+
+func (m model) spinner() string {
+	if len(spinnerFrames) == 0 {
+		return "·"
+	}
+	return spinnerFrames[m.spinnerFrame%len(spinnerFrames)]
+}
+
+func tickUpdates() tea.Cmd {
+	return tea.Tick(updatesPollInterval, func(time.Time) tea.Msg {
+		return updatesTickMsg{}
+	})
+}
+
+func (m model) Init() tea.Cmd {
+	if m.updatesPath == "" && !m.isLoading() {
+		return nil
+	}
+	return tickUpdates()
+}
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		return m, nil
+	case updatesTickMsg:
+		m.spinnerFrame++
+		if m.updatesPath != "" {
+			if patch, ok := readStatePatch(m.updatesPath, &m.lastUpdatesMod); ok {
+				m = applyStatePatch(m, patch)
+			}
+		}
+		if m.updatesPath != "" || m.isLoading() {
+			return m, tickUpdates()
+		}
 		return m, nil
 	case tea.KeyPressMsg:
 		key := msg.String()
@@ -673,10 +795,30 @@ func (m model) renderMain(width int) string {
 	footer := lipgloss.NewStyle().Foreground(lipgloss.Color(mutedColor)).Render(
 		"↑/↓ navigate   enter select   p switch profile   subc --help   q quit",
 	)
+	if status := m.loadingFooter(); status != "" {
+		footer = status + "\n" + footer
+	}
+	if m.state.UpdateAvailable {
+		footer = lipgloss.NewStyle().Foreground(lipgloss.Color(brandOrange)).Render("CLI update available. Run subc upgrade.") + "\n" + footer
+	}
 	if m.notice != "" {
 		footer = lipgloss.NewStyle().Foreground(lipgloss.Color(brandOrange)).Render("✓ "+m.notice) + "\n" + footer
 	}
 	return lipgloss.NewStyle().Padding(1, 2).Render(header + "\n\n" + body + "\n\n" + footer)
+}
+
+func (m model) loadingFooter() string {
+	if !m.isLoading() {
+		return ""
+	}
+	var parts []string
+	if m.state.ModelsLoading {
+		parts = append(parts, "Fetching catalog...")
+	}
+	if m.state.SessionsLoading {
+		parts = append(parts, "Scanning sessions...")
+	}
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(mutedColor)).Render(m.spinner() + " " + strings.Join(parts, "  ·  "))
 }
 
 func (m model) renderHeader(width int) string {
@@ -702,7 +844,7 @@ func (m model) renderHeader(width int) string {
 		lipgloss.NewStyle().Foreground(lipgloss.Color(mutedColor)).Render("Native terminal control center"),
 		"",
 		lipgloss.NewStyle().Foreground(lipgloss.Color(textColor)).Render("Profile  ") + orange.Render(m.state.ActiveProfile) + "  " + auth,
-		lipgloss.NewStyle().Foreground(lipgloss.Color(textColor)).Render("Model    ") + lipgloss.NewStyle().Foreground(lipgloss.Color(mutedColor)).Render(ellipsize(defaultModelDisplay(m.state), max(20, width-48))),
+		lipgloss.NewStyle().Foreground(lipgloss.Color(textColor)).Render("Model    ") + lipgloss.NewStyle().Foreground(lipgloss.Color(mutedColor)).Render(ellipsize(m.headerModelDisplay(), max(20, width-48))),
 		lipgloss.NewStyle().Foreground(lipgloss.Color(textColor)).Render("Subagent ") + lipgloss.NewStyle().Foreground(lipgloss.Color(mutedColor)).Render(ellipsize(subagentModelDisplay(m.state), max(20, width-48))),
 	}, "\n")
 	return lipgloss.JoinHorizontal(lipgloss.Bottom, logoBlock, "   ", info)
@@ -802,7 +944,11 @@ func (m model) renderSessionsDetail(width int) string {
 		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color(mutedColor)).Render("  "+session.HarnessName+" · "+sessionWhen(session.UpdatedAt)))
 	}
 	if len(m.state.Sessions) == 0 {
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color(mutedColor)).Render("No supported local sessions found."))
+		empty := "No supported local sessions found."
+		if m.state.SessionsLoading {
+			empty = m.spinner() + " Scanning local sessions..."
+		}
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color(mutedColor)).Render(empty))
 	}
 	return lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, false, false, true).BorderForeground(lipgloss.Color(faintColor)).PaddingLeft(2).Width(width).Render(strings.Join(lines, "\n"))
 }
@@ -833,7 +979,11 @@ func (m model) renderSessions() string {
 		rows = append(rows, row)
 	}
 	if len(rows) == 0 {
-		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color(mutedColor)).Render("No Claude Code, Codex, OpenCode, Pi, or Subconscious Code sessions found."))
+		empty := "No Claude Code, Codex, OpenCode, Pi, or Subconscious Code sessions found."
+		if m.state.SessionsLoading {
+			empty = m.spinner() + " Scanning local sessions..."
+		}
+		rows = append(rows, lipgloss.NewStyle().Foreground(lipgloss.Color(mutedColor)).Render(empty))
 	}
 	heading := lipgloss.NewStyle().Foreground(lipgloss.Color(brandOrange)).Bold(true).Render("✻  Coding sessions")
 	copy := lipgloss.NewStyle().Foreground(lipgloss.Color(mutedColor)).Render(wrapText("Choose a local session to resume. Conversation text stays hidden until you choose a destination harness.", width-4))
@@ -944,7 +1094,10 @@ func (m model) renderPlatformDetail(width int) string {
 
 func (m model) renderModelCatalog(width int) string {
 	title := lipgloss.NewStyle().Foreground(lipgloss.Color(textColor)).Bold(true).Render("Available models")
-	statusLabel := catalogStatusLabel(m.state.ModelSource, m.state.ModelError)
+	statusLabel := catalogStatusLabel(m.state.ModelSource, m.state.ModelError, m.state.ModelsLoading)
+	if m.state.ModelsLoading {
+		statusLabel = m.spinner() + " " + statusLabel
+	}
 	statusColor := brandOrange
 	if m.state.ModelSource == "packaged" || (m.state.ModelSource == "" && m.state.ModelError != "") {
 		statusColor = mutedColor
@@ -1136,10 +1289,21 @@ func defaultModelDisplay(state inputState) string {
 	if state.SelectedModel != "" {
 		return state.SelectedModel
 	}
+	if state.ModelsLoading {
+		return "Fetching catalog..."
+	}
 	if len(state.Models) > 0 {
 		return state.Models[0] + " (" + unsetSetting + ")"
 	}
 	return unsetSetting
+}
+
+func (m model) headerModelDisplay() string {
+	label := defaultModelDisplay(m.state)
+	if m.state.ModelsLoading {
+		return m.spinner() + " " + label
+	}
+	return label
 }
 
 func subagentModelOptions(state inputState) []string {
@@ -1238,7 +1402,10 @@ func wrapText(value string, width int) string {
 	return strings.Join(append(lines, line), "\n")
 }
 
-func catalogStatusLabel(source, modelError string) string {
+func catalogStatusLabel(source, modelError string, modelsLoading bool) string {
+	if modelsLoading {
+		return "Fetching catalog..."
+	}
 	switch source {
 	case "available":
 		return "Provisioned models"
@@ -1300,13 +1467,16 @@ func writeResult(path string, result outputResult) error {
 func run() error {
 	statePath := flag.String("state", "", "path to TUI input state JSON")
 	resultPath := flag.String("result", "", "path to write the selected command JSON")
+	updatesPath := flag.String("updates", "", "path to streamed TUI state patches")
 	flag.Parse()
 
 	state, err := readState(*statePath)
 	if err != nil {
 		return err
 	}
-	final, err := tea.NewProgram(newModel(state)).Run()
+	app := newModel(state)
+	app.updatesPath = *updatesPath
+	final, err := tea.NewProgram(app).Run()
 	if err != nil {
 		return err
 	}

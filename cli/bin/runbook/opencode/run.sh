@@ -19,6 +19,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../model-capabilities.generated.sh"
+source "${SCRIPT_DIR}/provider.sh"
 
 # Load shared env from SUBC_ENV_FILE, or a sibling .env / env.example.
 SHARED_ENV="${SUBC_ENV_FILE:-${SCRIPT_DIR}/../.env}"
@@ -58,19 +59,7 @@ while IFS= read -r model_id; do
   add_supported_model "$model_id"
 done <<< "${SUBCONSCIOUS_MODELS:-$DEFAULT_SUBCONSCIOUS_MODELS}"
 
-MODELS_JSON=""
-for model_id in "${SUPPORTED_MODELS[@]}"; do
-  vision_fields=""
-  if subc_model_supports_vision "$model_id"; then
-    vision_fields=',"attachment":true,"modalities":{"input":["text","image"],"output":["text"]}'
-  fi
-  model_json="\"${model_id}\":{\"name\":\"${model_id}\",\"tools\":true,\"limit\":{\"context\":${CONTEXT_LIMIT},\"output\":${OUTPUT_LIMIT}}${vision_fields}}"
-  if [[ -n "$MODELS_JSON" ]]; then
-    MODELS_JSON="${MODELS_JSON},${model_json}"
-  else
-    MODELS_JSON="$model_json"
-  fi
-done
+subc_opencode_build_models_json
 
 if [[ -z "$GATEWAY_URL" || -z "$API_KEY" ]]; then
   echo "error: GATEWAY_URL and API_KEY must be set in ../.env" >&2
@@ -96,15 +85,11 @@ if [[ "${BASH_SOURCE[0]:-$0}" == "${0}" ]]; then
 fi
 
 BASE_URL="${GATEWAY_URL%/}/v1"
-RUNTIME_PROVIDER_ID="subconscious-cli"
 
 export SUBCONSCIOUS_API_KEY="$API_KEY"
 # Compaction reporting needs the plugin on disk; this launch path writes nothing.
 export SUBCONSCIOUS_GATEWAY_URL="${GATEWAY_URL%/}"
-export OPENCODE_CONFIG_CONTENT=$(cat <<EOF
-{"\$schema":"https://opencode.ai/config.json","disabled_providers":["subconscious"],"provider":{"${RUNTIME_PROVIDER_ID}":{"npm":"@ai-sdk/openai-compatible","name":"Subconscious Gateway","options":{"baseURL":"${BASE_URL}","apiKey":"{env:SUBCONSCIOUS_API_KEY}","headers":{"x-subconscious-client":"opencode"}},"models":{${MODELS_JSON}}}},"model":"${RUNTIME_PROVIDER_ID}/${MODEL}"}
-EOF
-)
+export OPENCODE_CONFIG_CONTENT="$(subc_opencode_build_config_json "$BASE_URL" "$MODEL")"
 
 # If sourced, just export env and return.
 if [[ "${BASH_SOURCE[0]:-$0}" != "${0}" ]]; then

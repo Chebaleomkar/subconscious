@@ -116,27 +116,48 @@ export async function currentVersion() {
 export async function fetchLatestVersion(options = {}) {
   const fetchImpl = options.fetchImpl || globalThis.fetch;
   const timeoutMs = options.timeoutMs ?? UPDATE_CHECK_TIMEOUT_MS;
+  const signal = options.signal;
   if (typeof fetchImpl !== 'function') throw new Error('fetch is unavailable');
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   timeout.unref?.();
+  const onAbort = () => controller.abort();
+  if (signal?.aborted) {
+    const error = new Error('Update check was cancelled');
+    error.name = 'AbortError';
+    clearTimeout(timeout);
+    throw error;
+  }
+  signal?.addEventListener('abort', onAbort, { once: true });
 
   try {
-    const response = await fetchImpl(`https://registry.npmjs.org/${PACKAGE_NAME}/latest`, {
-      headers: {
-        Accept: 'application/json',
-        'Cache-Control': 'no-cache, no-store',
-        Pragma: 'no-cache',
-      },
-      cache: 'no-store',
-      signal: controller.signal,
+    const aborted = new Promise((_, reject) => {
+      const fail = () => {
+        const error = new Error(signal?.aborted ? 'Update check was cancelled' : 'Update check timed out');
+        error.name = 'AbortError';
+        reject(error);
+      };
+      controller.signal.addEventListener('abort', fail, { once: true });
     });
+    const response = await Promise.race([
+      fetchImpl(`https://registry.npmjs.org/${PACKAGE_NAME}/latest`, {
+        headers: {
+          Accept: 'application/json',
+          'Cache-Control': 'no-cache, no-store',
+          Pragma: 'no-cache',
+        },
+        cache: 'no-store',
+        signal: controller.signal,
+      }),
+      aborted,
+    ]);
     if (!response.ok) throw new Error(`npm returned HTTP ${response.status}`);
     const payload = await response.json();
     if (!parseVersion(payload?.version)) throw new Error('npm returned an invalid version');
     return payload.version;
   } finally {
+    signal?.removeEventListener('abort', onAbort);
     clearTimeout(timeout);
   }
 }
