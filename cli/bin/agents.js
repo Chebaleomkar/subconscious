@@ -906,6 +906,7 @@ export function runbookEnv(
         ? {
             SUBC_CLAUDE_SETTINGS: JSON.stringify(claudePickerSettings(models, model)),
             CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '0',
+            CLAUDE_CODE_AUTO_MODE_SERVER: '0',
           }
         : {}),
       SUBC_ENV_FILE: os.devNull,

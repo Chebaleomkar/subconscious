@@ -10,7 +10,7 @@ const fakeClaude = path.join(testDir, 'claude');
 
 await fs.writeFile(
   fakeClaude,
-  '#!/bin/sh\nprintf \'%s\\n%s\' "$ENABLE_CLAUDEAI_MCP_SERVERS" "$CLAUDE_CODE_SUBAGENT_MODEL"\n',
+  '#!/bin/sh\nprintf \'%s\\n%s\\n%s\' "$ENABLE_CLAUDEAI_MCP_SERVERS" "$CLAUDE_CODE_SUBAGENT_MODEL" "$CLAUDE_CODE_AUTO_MODE_SERVER"\n',
   { mode: 0o755 },
 );
 
@@ -34,7 +34,26 @@ test('Claude launch disables incompatible claude.ai connectors', () => {
   });
 
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout, 'false\nsubconscious/main-model');
+  assert.equal(result.stdout, 'false\nsubconscious/main-model\n0');
+});
+
+test('Claude launch opts out of server-side auto mode classifier', () => {
+  const runbook = new URL('../bin/runbook/claude-code/run.sh', import.meta.url);
+  const result = spawnSync('bash', [runbook.pathname], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: `${testDir}:${process.env.PATH}`,
+      GATEWAY_URL: 'https://gateway.example',
+      API_KEY: 'sk-test',
+      MODEL: 'subconscious/main-model',
+      CLAUDE_CODE_SUBAGENT_MODEL: '',
+      SUBC_ENV_FILE: os.devNull,
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, 'false\nsubconscious/main-model\n0');
 });
 
 test('Claude launch picker stays inside SUBCONSCIOUS_MODELS', async () => {
@@ -112,5 +131,5 @@ test('Claude launch passes an independently configured subagent model', () => {
   });
 
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout, 'false\nsubconscious/subagent-model');
+  assert.equal(result.stdout, 'false\nsubconscious/subagent-model\n0');
 });
